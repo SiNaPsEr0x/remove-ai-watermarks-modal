@@ -48,21 +48,22 @@ Nel dashboard Modal crea un Secret chiamato esattamente:
 raiw-auth
 ```
 
-Inserisci queste tre variabili:
+Inserisci le tre variabili `ADMIN_USER`, `ADMIN_PASSWORD` e `SESSION_SECRET`.
+Scegli username e password personali. Per `SESSION_SECRET`, genera una chiave casuale con Python:
 
-```text
-ADMIN_USER=tuo_username
-ADMIN_PASSWORD=una_password_lunga_e_sicura
-SESSION_SECRET=una_stringa_casuale_molto_lunga
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-> ⚠️ **IMPORTANTE:** `ADMIN_PASSWORD` deve contenere **almeno 10 caratteri**. Se è più corta, Modal può completare il deploy ma la web app non riesce ad avviarsi e l'URL pubblico resta irraggiungibile.
+Copia il valore generato nel campo `SESSION_SECRET` del Secret Modal, non nel repository.
+
+> ⚠️ **IMPORTANTE:** `ADMIN_PASSWORD` deve contenere **almeno 10 caratteri** e `SESSION_SECRET` **almeno 32 caratteri**. La web app verifica entrambi all'avvio; il controllo `/login` del workflow fallisce se uno dei valori non è valido.
 
 ### A cosa servono
 
 - `ADMIN_USER`: username iniziale dell'amministratore
 - `ADMIN_PASSWORD`: password iniziale dell'amministratore (**minimo 10 caratteri**)
-- `SESSION_SECRET`: chiave privata usata per firmare sessioni e token dell'app
+- `SESSION_SECRET`: chiave privata casuale usata per firmare sessioni e token dell'app (**minimo 32 caratteri**)
 
 ⚠️ Non inserire questi valori nel repository.
 
@@ -226,6 +227,8 @@ ADMIN_USER
 ADMIN_PASSWORD
 SESSION_SECRET
 ```
+
+Se nei log compare `SESSION_SECRET mancante o troppo corto`, modifica solo questa variabile nel Secret `raiw-auth`, mantenendo `ADMIN_USER` e `ADMIN_PASSWORD`. Usa una nuova chiave casuale generata con il comando della sezione 2, poi riesegui il workflow **Deploy Modal** nello stesso repository e ambiente. La sostituzione della chiave invalida eventuali sessioni e token dei job precedenti: effettua nuovamente l'accesso.
 
 ### Il primo job è lento
 
