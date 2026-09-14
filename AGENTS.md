@@ -84,3 +84,13 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 - Removed the hardcoded public Modal URL from CI; the workflow now detects the real URL emitted by `modal deploy`.
 - Runtime log capture now starts from the current deploy timestamp so stale password errors from previous deployments are not mixed into current diagnostics.
 - Added a six-second Modal rollout grace period before the smoke test; verified the next run reached `/login` with HTTP 200 on the first checked request after rollout.
+
+## Single-app lifecycle (2026-09-14)
+
+- CI uses MODAL_ENVIRONMENT (repository variable, default main) consistently.
+- CI resolves the app name using modal_app.APP_NAME, never a separate shell normalizer.
+- Optional repository variable MODAL_APP_NAME pins identity across repository rename/transfer; otherwise each fork derives its own name from github.repository. Keep name/environment unchanged for updates.
+- Serialize deploys with cancel-in-progress: false. Deploy with --name and --strategy recreate to terminate old containers before replacement. This can interrupt in-flight jobs and briefly interrupt service; do not force GPU always-on.
+- After every deploy verify exactly one non-stopped app in the exact project-name scope, and /login HTTP 200. Never stop apps by broad prefix or stop unrelated workspace apps.
+- One-time cleanup stopped verified IDs ap-luKxlY0j9FM0kFu4NTmr1n and ap-ZpPqrsdvDLI3EegV7kA43m. Replacement ID observed: ap-nxqtEZbJMP0FR7J2yv4OTx. Historical stopped entries may remain visible; they are not running apps.
+- Keep the cleanup operation out of ordinary deploys. Do not delete volumes, user Dict or secrets.
