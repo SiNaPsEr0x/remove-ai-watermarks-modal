@@ -275,7 +275,6 @@ def mark_job_result(username: str, ok: bool) -> None:
     memory=49_152,
     timeout=60 * 60,
     startup_timeout=60 * 60,
-    ephemeral_disk=120_000,
     volumes={CACHE_DIR: cache_vol},
     env=BASE_ENV,
 )
