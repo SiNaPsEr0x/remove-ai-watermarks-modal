@@ -122,6 +122,10 @@ jobs:
           echo "MODAL_WEB_URL=$web_url" >> "$GITHUB_ENV"
           echo "Public web URL: $web_url"
 
+      - name: Wait for Modal rollout
+        shell: bash
+        run: sleep 6
+
       - name: Verify deployed web app
         shell: bash
         run: |
@@ -138,14 +142,19 @@ jobs:
               exit 0
             fi
 
-            echo "Attempt $attempt/3 returned HTTP ${status:-curl-error}."
+            if [ "$attempt" -lt 3 ]; then
+              echo "Modal web app not ready yet (HTTP ${status:-curl-error}); retrying."
+              sleep 3
+              continue
+            fi
+
+            echo "Final health check returned HTTP ${status:-curl-error}."
             if [ -s /tmp/modal-site-body ]; then
               echo "--- response body ---"
               head -c 4000 /tmp/modal-site-body
               echo
               echo "--- end response body ---"
             fi
-            sleep 2
           done
 
           echo "Modal deployment completed, but the public web app is not healthy."
