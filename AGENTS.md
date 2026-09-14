@@ -50,8 +50,9 @@ The workflow must:
 6. verify that the named Modal Secret `raiw-auth` exists;
 7. record the UTC deployment start timestamp;
 8. run `modal deploy modal_app.py` and extract the actual `.modal.run` web URL from the deploy output instead of hardcoding it;
-9. smoke-test the deployed `/login` endpoint;
-10. print Modal runtime logs only from the current deployment timestamp onward when the smoke test fails.
+9. allow a short rollout grace period before health checks so a request is not sent to the previous revision during cutover;
+10. smoke-test the deployed `/login` endpoint;
+11. print Modal runtime logs only from the current deployment timestamp onward when the smoke test fails.
 
 The Modal CLI cache key must include OS, architecture, the resolved Python version, the pinned Modal CLI version, and a manual cache revision. Bump the revision if a cached environment must be invalidated manually. Do not cache secrets.
 
@@ -75,3 +76,4 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 - Added a no-content `/favicon.ico` route to avoid the browser-generated 404 noise.
 - Removed the hardcoded public Modal URL from CI; the workflow now detects the real URL emitted by `modal deploy`.
 - Runtime log capture now starts from the current deploy timestamp so stale password errors from previous deployments are not mixed into current diagnostics.
+- Added a six-second Modal rollout grace period before the smoke test; verified the next run reached `/login` with HTTP 200 on the first checked request after rollout.
