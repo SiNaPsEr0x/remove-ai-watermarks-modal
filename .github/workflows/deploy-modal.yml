@@ -111,6 +111,12 @@ jobs:
           print("Modal runtime secret 'raiw-auth' exists.")
           PY
 
+      - name: Inspect Modal apps (read-only)
+        run: |
+          modal app list --env main --json
+          modal deploy --help
+          modal app stop --help
+
       - name: Deploy to Modal
         shell: bash
         run: |
