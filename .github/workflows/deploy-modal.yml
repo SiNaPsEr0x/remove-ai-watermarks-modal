@@ -143,11 +143,11 @@ jobs:
           from pathlib import Path
 
           raw = Path("/tmp/modal-deploy.log").read_text(encoding="utf-8", errors="replace")
-          raw = re.sub(r"\\x1b\\[[0-9;?]*[ -/]*[@-~]", "", raw)
-          match = re.search(r"https://[a-z0-9.-]+\\.modal\\.r[\\s\\S]{0,80}?n", raw, re.IGNORECASE)
+          raw = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", raw)
+          match = re.search(r"https://[a-z0-9.-]+\.modal\.r[\s\S]{0,80}?n", raw, re.IGNORECASE)
           if match:
-              candidate = re.sub(r"[\\s│├└─]+", "", match.group(0))
-              if re.fullmatch(r"https://[a-z0-9.-]+\\.modal\\.run", candidate, re.IGNORECASE):
+              candidate = re.sub(r"[\s│├└─]+", "", match.group(0))
+              if re.fullmatch(r"https://[a-z0-9.-]+\.modal\.run", candidate, re.IGNORECASE):
                   print(candidate)
           PY
           )"
