@@ -70,6 +70,7 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 
 - Worker subprocess output is now streamed to Modal runtime logs while retaining the final log tail. A 30-second heartbeat makes long model downloads/inference visibly alive, and the web UI shows elapsed processing time while `/result` remains HTTP 202.
 - After a validated modification, keep `AGENTS.md` current, commit, push to `main`, and verify the resulting Actions run before considering the change complete.
+- GitHub Actions run 34885048703 successfully deployed the streaming/progress fix, verified `/login` HTTP 200, and verified exactly one deployed project app.
 
 - Diagnosed POST `/login` HTTP 500 caused by a missing or short `SESSION_SECRET`. The previous README placeholder was only 31 characters; replaced it with instructions to generate a private random key.
 - Added required Secret key checks and startup validation of the session-signing key. Repair the runtime Secret separately while preserving the administrator credentials, then redeploy the same app/environment; never generate or rotate a key automatically at container startup.
