@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#09090b"/><stop offset="1" stop-color="#17172a"/></linearGradient>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#59f3ff"/><stop offset="1" stop-color="#bd6cff"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <style>
+      .title{font:700 48px system-ui,Segoe UI,sans-serif;fill:#fff}.sub{font:400 22px system-ui,Segoe UI,sans-serif;fill:#b9b9c8}.box{fill:#12121b;stroke:#5de8ff;stroke-width:2}.h{font:700 26px system-ui,Segoe UI,sans-serif;fill:#fff}.t{font:400 18px system-ui,Segoe UI,sans-serif;fill:#c9c9d6}.n{font:800 22px system-ui,Segoe UI,sans-serif;fill:#0a0a0f}.arrow{stroke:url(#neon);stroke-width:5;fill:none;marker-end:url(#m)}
+    </style>
+    <marker id="m" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#9f7cff"/></marker>
+  </defs>
+  <rect width="1400" height="760" rx="28" fill="url(#bg)"/>
+  <text x="70" y="85" class="title">Remove AI Watermarks · Deploy su Modal</text>
+  <text x="70" y="125" class="sub">Setup in 5 passaggi · pensato anche per chi parte da zero</text>
+
+  <g filter="url(#glow)"><circle cx="110" cy="215" r="27" fill="url(#neon)"/><text x="103" y="223" class="n">1</text></g>
+  <rect x="160" y="170" width="1120" height="90" rx="18" class="box"/>
+  <text x="195" y="207" class="h">GitHub</text><text x="195" y="238" class="t">Usa questa repo come sorgente del progetto. Il file principale è modal_app.py.</text>
+
+  <path d="M700 265 L700 305" class="arrow"/>
+  <g filter="url(#glow)"><circle cx="110" cy="350" r="27" fill="url(#neon)"/><text x="103" y="358" class="n">2</text></g>
+  <rect x="160" y="305" width="1120" height="90" rx="18" class="box"/>
+  <text x="195" y="342" class="h">Modal Secret · raiw-auth</text><text x="195" y="373" class="t">Crea ADMIN_USER, ADMIN_PASSWORD e SESSION_SECRET. Questi valori non vanno mai messi nel repository.</text>
+
+  <path d="M700 400 L700 440" class="arrow"/>
+  <g filter="url(#glow)"><circle cx="110" cy="485" r="27" fill="url(#neon)"/><text x="103" y="493" class="n">3</text></g>
+  <rect x="160" y="440" width="1120" height="90" rx="18" class="box"/>
+  <text x="195" y="477" class="h">Modal API Token</text><text x="195" y="508" class="t">Crea un token Modal per il deploy automatico e conserva MODAL_TOKEN_ID e MODAL_TOKEN_SECRET.</text>
+
+  <path d="M700 535 L700 575" class="arrow"/>
+  <g filter="url(#glow)"><circle cx="110" cy="620" r="27" fill="url(#neon)"/><text x="103" y="628" class="n">4</text></g>
+  <rect x="160" y="575" width="540" height="100" rx="18" class="box"/>
+  <text x="195" y="613" class="h">GitHub Actions Secrets</text><text x="195" y="644" class="t">Aggiungi MODAL_TOKEN_ID</text><text x="195" y="668" class="t">e MODAL_TOKEN_SECRET.</text>
+
+  <g filter="url(#glow)"><circle cx="790" cy="620" r="27" fill="url(#neon)"/><text x="783" y="628" class="n">5</text></g>
+  <rect x="840" y="575" width="440" height="100" rx="18" class="box"/>
+  <text x="875" y="613" class="h">Push su main</text><text x="875" y="644" class="t">GitHub Actions esegue</text><text x="875" y="668" class="t">modal deploy modal_app.py</text>
+
+  <text x="70" y="725" class="sub">🔐 Segreti fuori dal codice · ☁️ deploy automatico · 👤 login/admin · 🧹 job temporanei</text>
+</svg>
