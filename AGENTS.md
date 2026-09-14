@@ -68,6 +68,7 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 
 - Made the Modal app identity fork-aware: the app name is derived automatically from the current GitHub repository, while `MODAL_APP_NAME` remains available as an explicit override for local/non-GitHub deploys.
 - Updated the workflow log command to use the same resolved app name and kept public URL discovery based on the URL emitted by `modal deploy`.
+- Hardened URL extraction against Modal CLI line wrapping; verified the resulting deploy and `/login` smoke test successfully.
 - Updated the README so fork users do not copy a fixed repository or `.modal.run` URL.
 
 - Diagnosed the first `Deploy Modal` failure.
