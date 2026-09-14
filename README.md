@@ -1,6 +1,6 @@
 # 🧹 Remove AI Watermarks on Modal
 
-<img src="https://raw.githubusercontent.com/SiNaPsEr0x/remove-ai-watermarks-modal/e3be2374d2b1ba47301a036d43c99eed99d86990/docs/setup-infographic.svg" alt="Remove AI Watermarks su Modal — guida rapida" width="100%">
+<img src="docs/setup-infographic-final.png" alt="Remove AI Watermarks su Modal — guida rapida" width="100%">
 
 Web app per eseguire `remove-ai-watermarks` su **Modal** tramite browser, con login utenti, pannello admin, cache modelli persistente e deploy automatico da GitHub.
 
@@ -35,7 +35,7 @@ remove-ai-watermarks-modal/
 ├─ README.md
 ├─ LICENSE
 ├─ docs/
-│  └─ setup-infographic.svg
+│  └─ setup-infographic-final.png
 └─ .github/
    └─ workflows/
       └─ deploy-modal.yml
