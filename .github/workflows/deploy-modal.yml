@@ -23,6 +23,9 @@ jobs:
     env:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      # The Python entry point normalizes this owner/repository pair into the
+      # fork-specific Modal app name. Do not hardcode a .modal.run URL.
+      MODAL_APP_NAME: ${{ github.repository }}
       MODAL_CLI_VERSION: "1.5.5"
 
     steps:
@@ -112,6 +115,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # Keep the name used by the workflow logs identical to the name
+          # resolved by modal_app.py from MODAL_APP_NAME.
+          modal_app_name="$(printf '%s' "${MODAL_APP_NAME:-${GITHUB_REPOSITORY:-remove-ai-watermarks-modal}}" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's#[^a-z0-9]+#-#g; s#-+#-#g; s#^-##; s#-$##')"
+          modal_app_name="raiw-${modal_app_name:-remove-ai-watermarks-modal}"
+          if [ "${#modal_app_name}" -gt 64 ]; then
+            base="${modal_app_name:0:55}"
+            base="${base%-}"
+            suffix="$(printf '%s' "$modal_app_name" | sha256sum | cut -c1-8)"
+            modal_app_name="${base}-${suffix}"
+          fi
+          echo "MODAL_APP_RESOLVED_NAME=$modal_app_name" >> "$GITHUB_ENV"
+          echo "Modal app name: $modal_app_name"
+
           echo "MODAL_LOG_SINCE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
 
           modal deploy modal_app.py | tee /tmp/modal-deploy.log
@@ -165,4 +184,4 @@ jobs:
         shell: bash
         run: |
           echo "Modal runtime logs for this deployment only:"
-          modal app logs remove-ai-watermarks-web --since "$MODAL_LOG_SINCE" --tail 200 --timestamps || true
+          modal app logs "$MODAL_APP_RESOLVED_NAME" --since "$MODAL_LOG_SINCE" --tail 200 --timestamps || true
