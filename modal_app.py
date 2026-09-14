@@ -16,8 +16,36 @@ from urllib.parse import urlparse
 
 import modal
 
-APP_NAME = "remove-ai-watermarks-web"
-AUTH_SECRET_NAME = "raiw-auth"
+def _normalize_modal_app_name(value: str) -> str:
+    """Return a stable, URL-safe Modal app name for this repository/fork."""
+    normalized = re.sub(r"[^a-z0-9]+", "-", (value or "").casefold())
+    normalized = re.sub(r"-+", "-", normalized).strip("-")
+    if not normalized:
+        normalized = "remove-ai-watermarks-modal"
+    if not normalized.startswith("raiw-"):
+        normalized = f"raiw-{normalized}"
+
+    # Keep the name within a conservative Modal/URL-friendly length while
+    # retaining a deterministic suffix to avoid collisions between long forks.
+    if len(normalized) > 64:
+        suffix = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:8]
+        normalized = f"{normalized[:55].rstrip('-')}-{suffix}"
+    return normalized
+
+
+def _resolve_modal_app_name() -> str:
+    # GitHub Actions supplies owner/repository automatically. MODAL_APP_NAME
+    # remains an override for local or non-GitHub deployments.
+    raw_name = (
+        os.environ.get("MODAL_APP_NAME")
+        or os.environ.get("GITHUB_REPOSITORY")
+        or "remove-ai-watermarks-modal"
+    )
+    return _normalize_modal_app_name(raw_name)
+
+
+APP_NAME = _resolve_modal_app_name()
+AUTH_SECRET_NAME = os.environ.get("RAIW_AUTH_SECRET_NAME", "raiw-auth")
 
 # ---------- Costi usati solo per la stima "ore free" ----------
 # Fonte Modal pricing, 14/09/2026. Il consumo reale può variare.
