@@ -43,12 +43,15 @@ The workflow must:
 
 1. check out the repository;
 2. set up Python 3.11 using the current supported `actions/setup-python` major version;
-3. install the current Modal CLI;
-4. verify the two required GitHub Modal token environment variables are present;
-5. verify that the named Modal Secret `raiw-auth` exists;
-6. run `modal deploy modal_app.py`;
-7. smoke-test the public `/login` endpoint;
-8. print recent Modal runtime logs when the smoke test fails.
+3. restore the cached `.modal-venv` environment when available;
+4. install the pinned Modal CLI only on cache miss, then save the virtual environment cache;
+5. verify the two required GitHub Modal token environment variables are present;
+6. verify that the named Modal Secret `raiw-auth` exists;
+7. run `modal deploy modal_app.py`;
+8. smoke-test the public `/login` endpoint;
+9. print recent Modal runtime logs when the smoke test fails.
+
+The Modal CLI cache key must include OS, architecture, the resolved Python version, the pinned Modal CLI version, and a manual cache revision. Bump the revision if a cached environment must be invalidated manually. Do not cache secrets.
 
 After any deployment-related change, inspect the newest `Deploy Modal` run and its job log until the final result is known.
 
@@ -63,3 +66,4 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 - Diagnosed the deployed site's runtime failure: `ADMIN_PASSWORD` inside Modal Secret `raiw-auth` was shorter than the 10-character minimum, so `bootstrap_admin()` crashed before the web app could answer requests.
 - Added deployment smoke testing and Modal runtime-log capture to GitHub Actions.
 - Added CI verification that the Modal Secret `raiw-auth` exists before deployment.
+- Added a persistent GitHub Actions cache for a dedicated `.modal-venv`; a valid cache hit skips Modal CLI installation entirely. The workflow pins Modal CLI 1.5.5 and uses `actions/cache` v6 restore/save actions.
