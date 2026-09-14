@@ -57,10 +57,12 @@ ADMIN_PASSWORD=una_password_lunga_e_sicura
 SESSION_SECRET=una_stringa_casuale_molto_lunga
 ```
 
+> ⚠️ **IMPORTANTE:** `ADMIN_PASSWORD` deve contenere **almeno 10 caratteri**. Se è più corta, Modal può completare il deploy ma la web app non riesce ad avviarsi e l'URL pubblico resta irraggiungibile.
+
 ### A cosa servono
 
 - `ADMIN_USER`: username iniziale dell'amministratore
-- `ADMIN_PASSWORD`: password iniziale dell'amministratore
+- `ADMIN_PASSWORD`: password iniziale dell'amministratore (**minimo 10 caratteri**)
 - `SESSION_SECRET`: chiave privata usata per firmare sessioni e token dell'app
 
 ⚠️ Non inserire questi valori nel repository.
@@ -194,6 +196,16 @@ modal serve modal_app.py
 ---
 
 # 🧯 Problemi comuni
+
+### Il deploy risulta riuscito ma il sito non si apre
+
+Controlla subito il Secret Modal `raiw-auth`. Se `ADMIN_PASSWORD` ha meno di **10 caratteri**, la funzione web si arresta durante l'avvio anche se il deploy è stato accettato da Modal. Nei log compare:
+
+```text
+RuntimeError: ADMIN_PASSWORD deve avere almeno 10 caratteri.
+```
+
+Aggiorna il Secret con una password valida e rilancia il workflow **Deploy Modal**.
 
 ### GitHub Action: credenziali Modal mancanti
 
