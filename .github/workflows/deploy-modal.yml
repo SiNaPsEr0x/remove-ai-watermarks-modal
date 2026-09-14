@@ -24,20 +24,53 @@ jobs:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       MODAL_WEB_URL: https://rocco-spano--remove-ai-watermarks-web-web.modal.run
+      MODAL_CLI_VERSION: "1.5.5"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
 
       - name: Setup Python
+        id: python
         uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
-      - name: Install Modal
+      - name: Restore Modal CLI environment
+        id: modal-cli-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .modal-venv
+          key: modal-cli-${{ runner.os }}-${{ runner.arch }}-python-${{ steps.python.outputs.python-version }}-modal-${{ env.MODAL_CLI_VERSION }}-r1
+
+      - name: Prepare Modal CLI
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade modal
+          set -euo pipefail
+
+          if [ "${{ steps.modal-cli-cache.outputs.cache-hit }}" = "true" ] \
+            && [ -x ".modal-venv/bin/modal" ] \
+            && .modal-venv/bin/python -c 'import modal' >/dev/null 2>&1; then
+            echo "Modal CLI restored from cache; installation skipped."
+          else
+            echo "Modal CLI cache missing or invalid; installing once."
+            rm -rf .modal-venv
+            python -m venv .modal-venv
+            .modal-venv/bin/python -m pip install \
+              --disable-pip-version-check \
+              --no-input \
+              "modal==$MODAL_CLI_VERSION"
+          fi
+
+          echo "$GITHUB_WORKSPACE/.modal-venv/bin" >> "$GITHUB_PATH"
+          .modal-venv/bin/modal --version
+
+      - name: Save Modal CLI environment
+        if: steps.modal-cli-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .modal-venv
+          key: ${{ steps.modal-cli-cache.outputs.cache-primary-key }}
 
       - name: Verify required GitHub secrets
         shell: bash
