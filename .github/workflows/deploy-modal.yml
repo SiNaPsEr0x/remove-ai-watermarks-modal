@@ -135,7 +135,10 @@ jobs:
 
           modal deploy modal_app.py | tee /tmp/modal-deploy.log
 
-          web_url="$(grep -Eo 'https://[a-z0-9.-]+\.modal\.run' /tmp/modal-deploy.log | head -n 1 || true)"
+          # Modal can wrap a long URL across terminal lines; remove whitespace
+          # before extracting the URL so wrapping cannot make a successful deploy fail.
+          deploy_output="$(tr -d '[:space:]' < /tmp/modal-deploy.log)"
+          web_url="$(printf '%s' "$deploy_output" | grep -Eo 'https://[a-z0-9.-]+\.modal\.run' | head -n 1 || true)"
           test -n "$web_url" || { echo "Unable to detect the deployed Modal web URL."; exit 1; }
 
           echo "MODAL_WEB_URL=$web_url" >> "$GITHUB_ENV"
