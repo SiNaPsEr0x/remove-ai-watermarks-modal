@@ -112,43 +112,6 @@ jobs:
           print("Modal runtime secret 'raiw-auth' exists.")
           PY
 
-      - name: Stop the two verified deployments once
-        if: github.repository == 'SiNaPsEr0x/remove-ai-watermarks-modal' && env.MODAL_ENVIRONMENT == 'main'
-        run: |
-          python - <<'PY'
-          import json
-          import subprocess
-          import time
-
-          targets = {
-              "ap-luKxlY0j9FM0kFu4NTmr1n": "remove-ai-watermarks-web",
-              "ap-ZpPqrsdvDLI3EegV7kA43m": "raiw-sinapser0x-remove-ai-watermarks-modal",
-          }
-          def inventory():
-              rows = json.loads(subprocess.check_output(["modal", "app", "list", "--json"], text=True))
-              if not isinstance(rows, list):
-                  raise RuntimeError("Unexpected Modal inventory schema")
-              return {row["app_id"]: row for row in rows}
-          rows = inventory()
-          for app_id, name in targets.items():
-              row = rows.get(app_id)
-              if row is not None and row["description"] != name:
-                  raise RuntimeError("App ID/name mismatch; refusing cleanup")
-          for app_id, name in targets.items():
-              row = rows.get(app_id)
-              if row is not None and row["state"] != "stopped":
-                  print(f"Stopping verified app {app_id}: {name}", flush=True)
-                  subprocess.run(["modal", "app", "stop", "--yes", app_id], check=True)
-          for attempt in range(20):
-              rows = inventory()
-              if all(app_id not in rows or rows[app_id]["state"] == "stopped" for app_id in targets):
-                  print("Both verified app IDs are stopped.")
-                  break
-              time.sleep(3)
-          else:
-              raise RuntimeError("Apps have not stopped; refusing deploy")
-          PY
-
       - name: Deploy to Modal
         shell: bash
         run: |
