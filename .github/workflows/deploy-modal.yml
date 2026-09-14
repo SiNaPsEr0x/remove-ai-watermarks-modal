@@ -112,6 +112,63 @@ jobs:
           print("Modal runtime secret 'raiw-auth' exists.")
           PY
 
+      # Temporary, user-authorized repair. Remove after successful verification.
+      - name: Repair invalid session key once
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import secrets
+          import modal
+          from modal_app import APP_NAME, AUTH_SECRET_NAME
+
+          deployed_app = modal.App.lookup(
+              APP_NAME, environment_name=os.environ["MODAL_ENVIRONMENT"], create_if_missing=False
+          )
+          secret = modal.Secret.from_name(
+              AUTH_SECRET_NAME,
+              environment_name=os.environ["MODAL_ENVIRONMENT"],
+              required_keys=["ADMIN_USER", "ADMIN_PASSWORD"],
+          )
+          code = (
+              "import json, os, re\n"
+              "print(json.dumps({"
+              "'admin_valid': bool(re.fullmatch(r'[a-z0-9._-]{3,32}', os.environ.get('ADMIN_USER','').strip().casefold())) and len(os.environ.get('ADMIN_PASSWORD','')) >= 10,"
+              "'session_valid': len(os.environ.get('SESSION_SECRET','')) >= 32"
+              "}))\n"
+          )
+
+          def check_config():
+              sandbox = modal.Sandbox.create(
+                  "python", "-c", code,
+                  app=deployed_app,
+                  image=modal.Image.debian_slim(python_version="3.11"),
+                  secrets=[secret],
+                  block_network=True,
+                  timeout=120,
+              )
+              try:
+                  sandbox.wait()
+                  if sandbox.returncode != 0:
+                      raise RuntimeError("Private authentication configuration check failed.")
+                  return json.loads(sandbox.stdout.read())
+              finally:
+                  sandbox.terminate()
+
+          before = check_config()
+          if not before.get("admin_valid"):
+              raise RuntimeError("Administrator configuration is invalid; no secrets were changed.")
+          if before.get("session_valid"):
+              print("SESSION_KEY_ALREADY_VALID; no secret changes.")
+          else:
+              secret.update({"SESSION_SECRET": secrets.token_urlsafe(48)})
+              after = check_config()
+              if not after.get("admin_valid") or not after.get("session_valid"):
+                  raise RuntimeError("Authentication configuration verification failed after repair.")
+              print("SESSION_KEY_REPAIRED; only SESSION_SECRET updated; administrator credentials preserved.")
+          PY
+
       - name: Deploy to Modal
         shell: bash
         run: |
@@ -183,6 +240,51 @@ jobs:
 
           echo "Modal deployment completed, but the public web app is not healthy."
           exit 1
+
+      - name: Verify authenticated login once
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import modal
+          from modal_app import APP_NAME, AUTH_SECRET_NAME
+
+          url = os.environ["MODAL_WEB_URL"]
+          if not re.fullmatch(r"https://[a-z0-9.-]+\.modal\.run", url):
+              raise RuntimeError("Unexpected deployed web URL.")
+          code = "\n".join([
+              "import os, urllib.request, urllib.parse, http.cookiejar",
+              "base = os.environ['RAIW_SMOKE_URL']",
+              "jar = http.cookiejar.CookieJar()",
+              "opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))",
+              "form = urllib.parse.urlencode({'username': os.environ['ADMIN_USER'], 'password': os.environ['ADMIN_PASSWORD']}).encode()",
+              "with opener.open(base + '/login', data=form, timeout=30) as response:",
+              "    assert response.status == 200 and response.geturl() == base + '/', 'Login did not reach the protected home page.'",
+              "assert any(cookie.name == 'raiw_session' and cookie.secure for cookie in jar), 'Secure session cookie missing.'",
+              "with opener.open(base + '/', timeout=30) as response:",
+              "    assert response.status == 200 and response.geturl() == base + '/', 'Authenticated session was not accepted.'",
+              "print('AUTHENTICATED_LOGIN_VERIFIED: secure session cookie and protected home HTTP 200.')",
+          ])
+          sandbox = modal.Sandbox.create(
+              "python", "-c", code,
+              app=modal.App.lookup(APP_NAME, environment_name=os.environ["MODAL_ENVIRONMENT"], create_if_missing=False),
+              image=modal.Image.debian_slim(python_version="3.11"),
+              secrets=[modal.Secret.from_name(AUTH_SECRET_NAME, environment_name=os.environ["MODAL_ENVIRONMENT"])],
+              env={"RAIW_SMOKE_URL": url},
+              timeout=120,
+          )
+          try:
+              sandbox.wait()
+              if sandbox.returncode != 0:
+                  raise RuntimeError("Authenticated login check failed; credential values are not logged.")
+              output = sandbox.stdout.read().strip()
+              if not output.startswith("AUTHENTICATED_LOGIN_VERIFIED:"):
+                  raise RuntimeError("Authenticated login check returned no success marker.")
+              print(output)
+          finally:
+              sandbox.terminate()
+          PY
 
       - name: Verify exactly one project app
         run: |
