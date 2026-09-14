@@ -25,6 +25,7 @@ The production entry point is `modal_app.py`; automatic deployment is handled by
 - `raiw-auth` must contain `ADMIN_USER`, `ADMIN_PASSWORD`, and `SESSION_SECRET`.
 - `ADMIN_PASSWORD` must contain at least 10 characters; otherwise `bootstrap_admin()` prevents the ASGI app from starting.
 - `SESSION_SECRET` must contain at least 32 characters.
+- The Secret reference must declare all three `required_keys`. Validate `SESSION_SECRET` before `bootstrap_admin()` in the web factory so the `/login` deployment smoke test cannot pass with an invalid session-signing key.
 - GitHub Actions authentication uses repository secrets `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`; never print their values.
 - FastAPI/Starlette `Request` annotations used inside the nested `web()` factory must be concrete runtime types. Do not re-enable postponed annotations with `from __future__ import annotations` unless the request types are moved to module scope or otherwise made resolvable by FastAPI.
 
@@ -65,6 +66,10 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 ## Change log
 
 ### 2026-09-14
+
+- Diagnosed POST `/login` HTTP 500 caused by a missing or short `SESSION_SECRET`. The previous README placeholder was only 31 characters; replaced it with instructions to generate a private random key.
+- Added required Secret key checks and startup validation of the session-signing key. Repair the runtime Secret separately while preserving the administrator credentials, then redeploy the same app/environment; never generate or rotate a key automatically at container startup.
+- Repaired the invalid runtime `SESSION_SECRET` with `modal.Secret.update`, preserving the other keys and never logging values. GitHub Actions run 34881586640 verified an authenticated login, the secure session cookie, protected home HTTP 200, and the existing single app ID. The temporary repair/check steps must be removed after verification rather than becoming an automatic key-rotation policy.
 
 - Made the Modal app identity fork-aware: the app name is derived automatically from the current GitHub repository, while `MODAL_APP_NAME` remains available as an explicit override for local/non-GitHub deploys.
 - Updated the workflow log command to use the same resolved app name and kept public URL discovery based on the URL emitted by `modal deploy`.
