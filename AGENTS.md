@@ -21,6 +21,10 @@ The production entry point is `modal_app.py`; automatic deployment is handled by
 - Worker model/cache data must live on the persistent Modal Volume `raiw-model-cache`, mounted at `/cache`.
 - `HF_HOME`, `XDG_CACHE_HOME`, `UV_CACHE_DIR`, and `DIFFSYNTH_MODEL_BASE_PATH` intentionally point inside `/cache`.
 - Uploaded images, generated outputs, and per-job logs must remain temporary and must not be persisted to the model-cache Volume.
+- Operational audit/session metadata lives in the named Modal Dict `raiw-audit-v1`; IP bans live in `raiw-bans-v1`. Neither Dict may store uploaded image bytes or generated output bytes.
+- Successful login enriches the session once with best-effort country and reverse-DNS host metadata. Later audit events reuse that cached session metadata so geo/rDNS lookups are not repeated on polling or every user action.
+- Banned IPs may still GET `/login` and `/favicon.ico` so deployment health checks remain valid, but login submission and protected app/admin routes are blocked. The admin UI must refuse banning the IP of the current admin session.
+- A worker result is successful when it produced a non-empty image that Pillow can verify, even if the subprocess exits non-zero. Preserve the exit code as diagnostic metadata and show a warning while keeping the verified output downloadable.
 - Upload limit is 30 MiB.
 - Authentication configuration comes from the Modal Secret `raiw-auth`; never commit secret values.
 - `raiw-auth` must contain `ADMIN_USER`, `ADMIN_PASSWORD`, and `SESSION_SECRET`.
@@ -68,6 +72,10 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 
 ### 2026-09-14
 
+- Added persistent audit/session telemetry and IP-ban state using `raiw-audit-v1` and `raiw-bans-v1`. The admin panel now shows active/recent sessions, country flags, client IP, reverse-DNS host, login/last-seen times, last command/action, a live event feed, and IP ban/unban controls.
+- Geo/rDNS enrichment runs once on successful login and is reused for later session events. Audit persistence is metadata-only; job files and image bytes remain temporary.
+- Fixed false job failures when `remove-ai-watermarks` returns a non-zero code after producing a valid image. Output is verified with Pillow; verified results stay downloadable and the UI displays the process anomaly as a warning. Polling now retries transient result-retrieval/network failures.
+- Ban enforcement leaves GET `/login` available for deployment smoke tests while blocking banned clients from authenticating or using protected routes.
 - Worker subprocess output is now streamed to Modal runtime logs while retaining the final log tail. A 30-second heartbeat makes long model downloads/inference visibly alive, and the web UI shows elapsed processing time while `/result` remains HTTP 202.
 - After a validated modification, keep `AGENTS.md` current, commit, push to `main`, and verify the resulting Actions run before considering the change complete.
 - GitHub Actions run 34885048703 successfully deployed the streaming/progress fix, verified `/login` HTTP 200, and verified exactly one deployed project app.

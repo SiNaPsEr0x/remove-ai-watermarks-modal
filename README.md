@@ -7,7 +7,7 @@ Web app per eseguire `remove-ai-watermarks` su **Modal** tramite browser, con lo
 ## ✨ Cosa fa
 
 - 🔐 Login con utenti gestiti dall'admin
-- 👑 Pannello amministratore per creare/disabilitare utenti e cambiare password
+- 👑 Pannello amministratore per gestire utenti, vedere sessioni/attività live e bannare/sbloccare IP
 - 📷 Upload immagini JPG, PNG, WebP, HEIC/HEIF e AVIF
 - ⚡ Elaborazione su GPU Modal
 - 💾 Cache modelli persistente
@@ -126,7 +126,7 @@ Username: valore di ADMIN_USER
 Password: valore di ADMIN_PASSWORD
 ```
 
-Dal pannello admin puoi poi creare altri utenti.
+Dal pannello admin puoi poi creare altri utenti e vedere, in tempo quasi reale, utenti loggati, nazione/IP, reverse DNS host, orari, ultimo comando/azione ed eventi recenti. Gli IP possono essere bannati o sbloccati direttamente dal pannello; l'IP della sessione admin corrente non può essere bannato per errore.
 
 ---
 
@@ -136,8 +136,9 @@ Dal pannello admin puoi poi creare altri utenti.
 2. Carica una foto.
 3. `modal_app.py` invia il job al worker GPU.
 4. Il worker esegue `remove-ai-watermarks all` con pipeline/backend automatici.
-5. L'output viene restituito al browser.
-6. La directory temporanea del job viene eliminata.
+5. Se il processo termina con un codice anomalo ma ha prodotto un'immagine valida e verificabile, il risultato resta scaricabile e l'interfaccia mostra un avviso invece di un falso errore.
+6. L'output viene restituito al browser.
+7. La directory temporanea del job viene eliminata.
 
 Nel codice attuale il worker usa una **GPU L4**, 2 CPU e circa 48 GiB di RAM. Foto e output non vengono salvati nel volume persistente: il volume serve alla cache dei modelli. 
 
@@ -150,6 +151,8 @@ Persistono:
 - cache dei modelli
 - dati degli utenti
 - contatori/statistiche minime
+- metadati operativi di sessione/audit (IP, paese, host rDNS, orari, azioni/comandi)
+- elenco degli IP bannati
 
 Non vengono conservati come storage permanente:
 
