@@ -23,7 +23,6 @@ jobs:
     env:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-      MODAL_WEB_URL: https://rocco-spano--remove-ai-watermarks-web-web.modal.run
       MODAL_CLI_VERSION: "1.5.5"
 
     steps:
@@ -110,13 +109,24 @@ jobs:
           PY
 
       - name: Deploy to Modal
-        run: modal deploy modal_app.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "MODAL_LOG_SINCE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
+          modal deploy modal_app.py | tee /tmp/modal-deploy.log
+
+          web_url="$(grep -Eo 'https://[a-z0-9.-]+\.modal\.run' /tmp/modal-deploy.log | head -n 1 || true)"
+          test -n "$web_url" || { echo "Unable to detect the deployed Modal web URL."; exit 1; }
+
+          echo "MODAL_WEB_URL=$web_url" >> "$GITHUB_ENV"
+          echo "Public web URL: $web_url"
 
       - name: Verify deployed web app
         shell: bash
         run: |
           set -u
-          for attempt in 1 2; do
+          for attempt in 1 2 3; do
             rm -f /tmp/modal-site-body
             status="$(curl --silent --show-error --location --connect-timeout 5 --max-time 10 \
               --output /tmp/modal-site-body \
@@ -128,7 +138,7 @@ jobs:
               exit 0
             fi
 
-            echo "Attempt $attempt/2 returned HTTP ${status:-curl-error}."
+            echo "Attempt $attempt/3 returned HTTP ${status:-curl-error}."
             if [ -s /tmp/modal-site-body ]; then
               echo "--- response body ---"
               head -c 4000 /tmp/modal-site-body
@@ -145,5 +155,5 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          echo "Recent Modal runtime logs:"
-          modal app logs remove-ai-watermarks-web --since 10m --tail 200 --timestamps || true
+          echo "Modal runtime logs for this deployment only:"
+          modal app logs remove-ai-watermarks-web --since "$MODAL_LOG_SINCE" --tail 200 --timestamps || true
