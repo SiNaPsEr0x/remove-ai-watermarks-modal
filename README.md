@@ -14,6 +14,7 @@ Web app per eseguire `remove-ai-watermarks` su **Modal** tramite browser, con lo
 - 🧹 File di ogni job eliminati automaticamente dopo l'elaborazione
 - 📊 Stima del credito/ore Modal residue
 - ☁️ Deploy automatico con GitHub Actions
+- 🔗 Nome dell'app Modal e URL pubblico ricavati automaticamente per ogni fork
 
 Il file principale è `modal_app.py`. L'app usa il Secret Modal `raiw-auth` con `ADMIN_USER`, `ADMIN_PASSWORD` e `SESSION_SECRET`. Questa configurazione è richiesta direttamente dal codice. 
 
@@ -23,9 +24,7 @@ Il file principale è `modal_app.py`. L'app usa il Secret Modal `raiw-auth` con 
 
 ## 1. Fai fork o copia questa repository
 
-Repository:
-
-`SiNaPsEr0x/remove-ai-watermarks-modal`
+Puoi usare **Fork** su GitHub oppure clonare/copiare il progetto nel tuo account. Non devi modificare a mano il nome dell'app o l'URL Modal: il workflow legge automaticamente il repository corrente (`owner/nome-repository`), genera un nome Modal separato per quella copia e ricava l'URL pubblico direttamente dall'output del deploy.
 
 La struttura finale è:
 
@@ -110,6 +109,8 @@ modal deploy modal_app.py
 Modal documenta `modal deploy` come comando ufficiale per pubblicare un'app e mostra anche GitHub Actions come schema supportato per il deploy continuo.
 
 Puoi anche avviare il workflow manualmente dalla scheda **Actions** grazie a `workflow_dispatch`.
+
+Ogni fork viene quindi pubblicato con una propria identità Modal e con un proprio URL. Dopo il deploy, usa l'indirizzo stampato nel log dell'azione: non copiare l'URL `.modal.run` di un'altra repository.
 
 ---
 
