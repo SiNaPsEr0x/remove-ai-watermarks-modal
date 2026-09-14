@@ -23,6 +23,7 @@ jobs:
     env:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_WEB_URL: https://rocco-spano--remove-ai-watermarks-web-web.modal.run
 
     steps:
       - name: Checkout repository
@@ -46,3 +47,32 @@ jobs:
 
       - name: Deploy to Modal
         run: modal deploy modal_app.py
+
+      - name: Verify deployed web app
+        shell: bash
+        run: |
+          set -u
+          for attempt in {1..12}; do
+            rm -f /tmp/modal-site-body
+            status="$(curl --silent --show-error --location --max-time 30 \
+              --output /tmp/modal-site-body \
+              --write-out '%{http_code}' \
+              "$MODAL_WEB_URL/login" || true)"
+
+            if [ "$status" = "200" ]; then
+              echo "Modal web app is healthy: $MODAL_WEB_URL/login (HTTP 200)"
+              exit 0
+            fi
+
+            echo "Attempt $attempt/12 returned HTTP ${status:-curl-error}."
+            if [ -s /tmp/modal-site-body ]; then
+              echo "--- response body ---"
+              head -c 4000 /tmp/modal-site-body
+              echo
+              echo "--- end response body ---"
+            fi
+            sleep 5
+          done
+
+          echo "Modal deployment completed, but the public web app is not healthy."
+          exit 1
