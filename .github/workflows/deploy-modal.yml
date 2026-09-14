@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: modal-production
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -25,7 +25,8 @@ jobs:
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       # The Python entry point normalizes this owner/repository pair into the
       # fork-specific Modal app name. Do not hardcode a .modal.run URL.
-      MODAL_APP_NAME: ${{ github.repository }}
+      MODAL_APP_NAME: ${{ vars.MODAL_APP_NAME || github.repository }}
+      MODAL_ENVIRONMENT: ${{ vars.MODAL_ENVIRONMENT || 'main' }}
       MODAL_CLI_VERSION: "1.5.5"
 
     steps:
@@ -111,35 +112,55 @@ jobs:
           print("Modal runtime secret 'raiw-auth' exists.")
           PY
 
-      - name: Inspect Modal apps (read-only)
+      - name: Stop the two verified deployments once
+        if: github.repository == 'SiNaPsEr0x/remove-ai-watermarks-modal' && env.MODAL_ENVIRONMENT == 'main'
         run: |
-          modal app list --env main --json
-          modal deploy --help
-          modal app stop --help
+          python - <<'PY'
+          import json
+          import subprocess
+          import time
+
+          targets = {
+              "ap-luKxlY0j9FM0kFu4NTmr1n": "remove-ai-watermarks-web",
+              "ap-ZpPqrsdvDLI3EegV7kA43m": "raiw-sinapser0x-remove-ai-watermarks-modal",
+          }
+          def inventory():
+              rows = json.loads(subprocess.check_output(["modal", "app", "list", "--json"], text=True))
+              if not isinstance(rows, list):
+                  raise RuntimeError("Unexpected Modal inventory schema")
+              return {row["app_id"]: row for row in rows}
+          rows = inventory()
+          for app_id, name in targets.items():
+              row = rows.get(app_id)
+              if row is not None and row["description"] != name:
+                  raise RuntimeError("App ID/name mismatch; refusing cleanup")
+          for app_id, name in targets.items():
+              row = rows.get(app_id)
+              if row is not None and row["state"] != "stopped":
+                  print(f"Stopping verified app {app_id}: {name}", flush=True)
+                  subprocess.run(["modal", "app", "stop", "--yes", app_id], check=True)
+          for attempt in range(20):
+              rows = inventory()
+              if all(app_id not in rows or rows[app_id]["state"] == "stopped" for app_id in targets):
+                  print("Both verified app IDs are stopped.")
+                  break
+              time.sleep(3)
+          else:
+              raise RuntimeError("Apps have not stopped; refusing deploy")
+          PY
 
       - name: Deploy to Modal
         shell: bash
         run: |
           set -euo pipefail
 
-          # Keep the name used by the workflow logs identical to the name
-          # resolved by modal_app.py from MODAL_APP_NAME.
-          modal_app_name="$(printf '%s' "${MODAL_APP_NAME:-${GITHUB_REPOSITORY:-remove-ai-watermarks-modal}}" \
-            | tr '[:upper:]' '[:lower:]' \
-            | sed -E 's#[^a-z0-9]+#-#g; s#-+#-#g; s#^-##; s#-$##')"
-          modal_app_name="raiw-${modal_app_name:-remove-ai-watermarks-modal}"
-          if [ "${#modal_app_name}" -gt 64 ]; then
-            base="${modal_app_name:0:55}"
-            base="${base%-}"
-            suffix="$(printf '%s' "$modal_app_name" | sha256sum | cut -c1-8)"
-            modal_app_name="${base}-${suffix}"
-          fi
+          modal_app_name="$(python -c 'from modal_app import APP_NAME; print(APP_NAME)')"
           echo "MODAL_APP_RESOLVED_NAME=$modal_app_name" >> "$GITHUB_ENV"
           echo "Modal app name: $modal_app_name"
 
           echo "MODAL_LOG_SINCE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
 
-          modal deploy modal_app.py | tee /tmp/modal-deploy.log
+          modal deploy --name "$modal_app_name" --strategy recreate modal_app.py | tee /tmp/modal-deploy.log
 
           # Modal may wrap a long URL between physical terminal lines.
           # Recombine only the URL candidate so timestamps/tree glyphs cannot
@@ -200,8 +221,33 @@ jobs:
           echo "Modal deployment completed, but the public web app is not healthy."
           exit 1
 
+      - name: Verify exactly one project app
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import time
+
+          name = os.environ["MODAL_APP_RESOLVED_NAME"]
+          scope = {name}
+          if os.environ["GITHUB_REPOSITORY"] == "SiNaPsEr0x/remove-ai-watermarks-modal":
+              scope.add("remove-ai-watermarks-web")
+          for attempt in range(20):
+              rows = json.loads(subprocess.check_output(["modal", "app", "list", "--json"], text=True))
+              active = [r for r in rows if r["description"] in scope and r["state"] != "stopped"]
+              if len(active) == 1 and active[0]["description"] == name and active[0]["state"] == "deployed":
+                  print("SINGLE_APP_VERIFIED " + json.dumps(active[0]))
+                  with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as report:
+                      report.write(f"Single deployed project app: {name} ({active[0]['app_id']})\n")
+                  break
+              time.sleep(3)
+          else:
+              raise RuntimeError("Expected exactly one deployed project app: " + json.dumps(active))
+          PY
+
       - name: Show Modal runtime logs
-        if: failure()
+        if: failure() && env.MODAL_LOG_SINCE != ''
         shell: bash
         run: |
           echo "Modal runtime logs for this deployment only:"
