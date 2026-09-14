@@ -105,7 +105,10 @@ worker_image = (
     .uv_pip_install("remove-ai-watermarks[visible,heif,qwen-zimage,migan]")
 )
 
-auth_secret = modal.Secret.from_name(AUTH_SECRET_NAME)
+auth_secret = modal.Secret.from_name(
+    AUTH_SECRET_NAME,
+    required_keys=["ADMIN_USER", "ADMIN_PASSWORD", "SESSION_SECRET"],
+)
 
 
 def utc_now_iso() -> str:
@@ -216,7 +219,9 @@ def b64u_decode(data: str) -> bytes:
 def signing_secret() -> bytes:
     value = os.environ.get("SESSION_SECRET", "")
     if len(value) < 32:
-        raise RuntimeError("SESSION_SECRET mancante o troppo corto nel Secret raiw-auth.")
+        raise RuntimeError(
+            f"SESSION_SECRET mancante o troppo corto (minimo 32 caratteri) nel Secret {AUTH_SECRET_NAME}."
+        )
     return value.encode("utf-8")
 
 
@@ -522,6 +527,8 @@ def web():
     from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
     from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
+    # Fail during startup so the deployment smoke test also checks session signing.
+    signing_secret()
     bootstrap_admin()
     web_app = FastAPI(title="Remove AI Watermarks")
 
@@ -774,3 +781,4 @@ def main():
     print("Prima configura il Secret raiw-auth con ADMIN_USER, ADMIN_PASSWORD e SESSION_SECRET.")
     print("Sviluppo: modal serve modal_app.py")
     print("Deploy:    modal deploy modal_app.py")
+
