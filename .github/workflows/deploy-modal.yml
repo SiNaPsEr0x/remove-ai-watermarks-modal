@@ -52,9 +52,9 @@ jobs:
         shell: bash
         run: |
           set -u
-          for attempt in {1..12}; do
+          for attempt in {1..4}; do
             rm -f /tmp/modal-site-body
-            status="$(curl --silent --show-error --location --max-time 30 \
+            status="$(curl --silent --show-error --location --connect-timeout 5 --max-time 15 \
               --output /tmp/modal-site-body \
               --write-out '%{http_code}' \
               "$MODAL_WEB_URL/login" || true)"
@@ -64,15 +64,22 @@ jobs:
               exit 0
             fi
 
-            echo "Attempt $attempt/12 returned HTTP ${status:-curl-error}."
+            echo "Attempt $attempt/4 returned HTTP ${status:-curl-error}."
             if [ -s /tmp/modal-site-body ]; then
               echo "--- response body ---"
               head -c 4000 /tmp/modal-site-body
               echo
               echo "--- end response body ---"
             fi
-            sleep 5
+            sleep 3
           done
 
           echo "Modal deployment completed, but the public web app is not healthy."
           exit 1
+
+      - name: Show Modal runtime logs
+        if: failure()
+        shell: bash
+        run: |
+          echo "Recent Modal runtime logs:"
+          modal app logs remove-ai-watermarks-web --since 10m --tail 200 --timestamps || true
