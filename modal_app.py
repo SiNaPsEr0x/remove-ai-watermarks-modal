@@ -8,6 +8,7 @@ import re
 import secrets
 import subprocess
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -340,7 +341,9 @@ def process_image(input_bytes: bytes, original_name: str, username: str) -> dict
                 "auto",
             ]
 
-            proc = subprocess.run(
+            print(f"[job] Avvio elaborazione: {safe_name}", flush=True)
+            log_chunks: list[str] = []
+            proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -348,10 +351,49 @@ def process_image(input_bytes: bytes, original_name: str, username: str) -> dict
                 encoding="utf-8",
                 errors="replace",
                 env={**os.environ, **BASE_ENV},
-                timeout=55 * 60,
-                check=False,
+                bufsize=1,
             )
-            log_text = proc.stdout or ""
+
+            def stream_output() -> None:
+                if proc.stdout is None:
+                    return
+                for line in iter(proc.stdout.readline, ""):
+                    log_chunks.append(line)
+                    print(line, end="", flush=True)
+                proc.stdout.close()
+
+            reader = threading.Thread(target=stream_output, name="raiw-log-stream", daemon=True)
+            reader.start()
+            deadline = time.monotonic() + 55 * 60
+            next_heartbeat = time.monotonic() + 30
+
+            while proc.poll() is None:
+                now = time.monotonic()
+                if now >= deadline:
+                    proc.kill()
+                    proc.wait()
+                    reader.join(timeout=5)
+                    log_text = "".join(log_chunks)
+                    print("[job] Timeout: processo terminato.", flush=True)
+                    return {
+                        "status": "error",
+                        "message": "Elaborazione interrotta per timeout.",
+                        "log": log_text[-LOG_RETURN_LIMIT:],
+                        "elapsed_seconds": round(time.monotonic() - started, 1),
+                    }
+                if now >= next_heartbeat:
+                    elapsed = round(now - started, 1)
+                    print(f"[job] Elaborazione ancora in corso ({elapsed} s).", flush=True)
+                    next_heartbeat = now + 30
+                time.sleep(1)
+
+            reader.join(timeout=5)
+            log_text = "".join(log_chunks)
+            print(
+                f"[job] Processo terminato con codice {proc.returncode} "
+                f"in {round(time.monotonic() - started, 1)} s.",
+                flush=True,
+            )
 
             if proc.returncode != 0:
                 return {
@@ -379,14 +421,6 @@ def process_image(input_bytes: bytes, original_name: str, username: str) -> dict
                 "log": log_text[-LOG_RETURN_LIMIT:],
                 "elapsed_seconds": round(time.monotonic() - started, 1),
             }
-    except subprocess.TimeoutExpired as exc:
-        log_text = ((exc.stdout or "") if isinstance(exc.stdout, str) else "")
-        return {
-            "status": "error",
-            "message": "Elaborazione interrotta per timeout.",
-            "log": log_text[-LOG_RETURN_LIMIT:],
-            "elapsed_seconds": round(time.monotonic() - started, 1),
-        }
     except Exception as exc:
         return {
             "status": "error",
@@ -429,7 +463,7 @@ progress{width:100%;height:14px;margin-top:14px}.ok{color:#087a2f}.err{color:#b4
 </div><script>
 const form=document.getElementById('form'),statusBox=document.getElementById('status'),progress=document.getElementById('progress'),actions=document.getElementById('actions'),download=document.getElementById('download'),logs=document.getElementById('logs');
 async function freeStatus(){try{const r=await fetch('/api/free-status');const d=await r.json();document.getElementById('credit').textContent=d.credit_label;document.getElementById('hours').textContent=d.hours_label;document.getElementById('freeNote').textContent=d.note;}catch(e){document.getElementById('credit').textContent='n/d';document.getElementById('hours').textContent='n/d';}}
-async function poll(token){for(;;){const r=await fetch('/result/'+encodeURIComponent(token));if(r.status===202){statusBox.textContent='⏳ Elaborazione in corso…';await new Promise(x=>setTimeout(x,4000));continue;}const d=await r.json();progress.classList.add('hidden');if(d.status==='done'){statusBox.innerHTML='<span class="ok">✅ Completato</span> · '+d.output_name+' · '+d.elapsed_seconds+' s';download.href='/download/'+encodeURIComponent(token);logs.href='/logs/'+encodeURIComponent(token);actions.classList.remove('hidden');freeStatus();}else{statusBox.innerHTML='<span class="err">❌ '+(d.message||'Errore')+'</span>';logs.href='/logs/'+encodeURIComponent(token);actions.classList.remove('hidden');}break;}}
+async function poll(token){const started=Date.now();for(;;){const r=await fetch('/result/'+encodeURIComponent(token));if(r.status===202){const elapsed=Math.floor((Date.now()-started)/1000);statusBox.textContent='⏳ Elaborazione in corso… '+elapsed+' s';await new Promise(x=>setTimeout(x,4000));continue;}const d=await r.json();progress.classList.add('hidden');if(d.status==='done'){statusBox.innerHTML='<span class="ok">✅ Completato</span> · '+d.output_name+' · '+d.elapsed_seconds+' s';download.href='/download/'+encodeURIComponent(token);logs.href='/logs/'+encodeURIComponent(token);actions.classList.remove('hidden');freeStatus();}else{statusBox.innerHTML='<span class="err">❌ '+(d.message||'Errore')+'</span>';logs.href='/logs/'+encodeURIComponent(token);actions.classList.remove('hidden');}break;}}
 form.addEventListener('submit',async e=>{e.preventDefault();actions.classList.add('hidden');progress.classList.remove('hidden');statusBox.textContent='📤 Caricamento…';const body=new FormData(form);const r=await fetch('/submit',{method:'POST',body});if(!r.ok){progress.classList.add('hidden');let t=await r.text();statusBox.innerHTML='<span class="err">❌ '+t+'</span>';return;}const d=await r.json();statusBox.textContent='🚀 Job avviato…';poll(d.job_token);});
 freeStatus();
 </script></body></html>"""

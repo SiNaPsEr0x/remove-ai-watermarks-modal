@@ -11,6 +11,7 @@ The production entry point is `modal_app.py`; automatic deployment is handled by
 2. Check the current Modal and dependency documentation before changing APIs, resource parameters, or deployment syntax.
 3. Keep this file updated when deployment constraints, architecture, secrets, storage, or operational requirements change.
 4. Prefer the smallest change that fixes the root cause and verify the resulting GitHub Actions run.
+5. After every successfully validated change, update `AGENTS.md` when relevant, commit the coherent change, push it to `main`, and verify the resulting GitHub Actions run. Do not leave successful changes only in the local checkout.
 
 ## Architecture and invariants
 
@@ -66,6 +67,9 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 ## Change log
 
 ### 2026-09-14
+
+- Worker subprocess output is now streamed to Modal runtime logs while retaining the final log tail. A 30-second heartbeat makes long model downloads/inference visibly alive, and the web UI shows elapsed processing time while `/result` remains HTTP 202.
+- After a validated modification, keep `AGENTS.md` current, commit, push to `main`, and verify the resulting Actions run before considering the change complete.
 
 - Diagnosed POST `/login` HTTP 500 caused by a missing or short `SESSION_SECRET`. The previous README placeholder was only 31 characters; replaced it with instructions to generate a private random key.
 - Added required Secret key checks and startup validation of the session-signing key. Repair the runtime Secret separately while preserving the administrator credentials, then redeploy the same app/environment; never generate or rotate a key automatically at container startup.
