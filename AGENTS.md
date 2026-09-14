@@ -25,6 +25,7 @@ The production entry point is `modal_app.py`; automatic deployment is handled by
 - `ADMIN_PASSWORD` must contain at least 10 characters; otherwise `bootstrap_admin()` prevents the ASGI app from starting.
 - `SESSION_SECRET` must contain at least 32 characters.
 - GitHub Actions authentication uses repository secrets `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`; never print their values.
+- FastAPI/Starlette `Request` annotations used inside the nested `web()` factory must be concrete runtime types. Do not re-enable postponed annotations with `from __future__ import annotations` unless the request types are moved to module scope or otherwise made resolvable by FastAPI.
 
 ## Modal resource configuration
 
@@ -47,11 +48,14 @@ The workflow must:
 4. install the pinned Modal CLI only on cache miss, then save the virtual environment cache;
 5. verify the two required GitHub Modal token environment variables are present;
 6. verify that the named Modal Secret `raiw-auth` exists;
-7. run `modal deploy modal_app.py`;
-8. smoke-test the public `/login` endpoint;
-9. print recent Modal runtime logs when the smoke test fails.
+7. record the UTC deployment start timestamp;
+8. run `modal deploy modal_app.py` and extract the actual `.modal.run` web URL from the deploy output instead of hardcoding it;
+9. smoke-test the deployed `/login` endpoint;
+10. print Modal runtime logs only from the current deployment timestamp onward when the smoke test fails.
 
 The Modal CLI cache key must include OS, architecture, the resolved Python version, the pinned Modal CLI version, and a manual cache revision. Bump the revision if a cached environment must be invalidated manually. Do not cache secrets.
+
+Modal-generated `.modal.run` URLs are derived from the workspace/environment source plus the web-function label. The arbitrary `modal.run` hostname prefix is not a free-form setting. Use `label=` to control the function label portion or a Modal custom domain where the workspace plan supports custom domains.
 
 After any deployment-related change, inspect the newest `Deploy Modal` run and its job log until the final result is known.
 
@@ -67,3 +71,7 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 - Added deployment smoke testing and Modal runtime-log capture to GitHub Actions.
 - Added CI verification that the Modal Secret `raiw-auth` exists before deployment.
 - Added a persistent GitHub Actions cache for a dedicated `.modal-venv`; a valid cache hit skips Modal CLI installation entirely. The workflow pins Modal CLI 1.5.5 and uses `actions/cache` v6 restore/save actions.
+- Fixed FastAPI HTTP 422 responses on `/` and `/login` by removing postponed annotations so locally imported `Request` and `UploadFile` types are resolved when nested route functions are defined.
+- Added a no-content `/favicon.ico` route to avoid the browser-generated 404 noise.
+- Removed the hardcoded public Modal URL from CI; the workflow now detects the real URL emitted by `modal deploy`.
+- Runtime log capture now starts from the current deploy timestamp so stale password errors from previous deployments are not mixed into current diagnostics.
