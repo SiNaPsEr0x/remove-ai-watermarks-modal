@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import base64
 import hashlib
 import hmac
@@ -518,6 +516,10 @@ def web():
         if current_user_from_request(request):
             return RedirectResponse("/", status_code=303)
         return HTMLResponse(LOGIN_HTML.replace('__ERROR__', ''))
+
+    @web_app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        return Response(status_code=204)
 
     @web_app.post("/login")
     def login(request: Request, username: str = Form(...), password: str = Form(...)):
