@@ -15,6 +15,7 @@ The production entry point is `modal_app.py`; automatic deployment is handled by
 ## Architecture and invariants
 
 - Runtime: Python 3.11 on Modal.
+- The Modal app name is derived from `MODAL_APP_NAME` (or, in GitHub Actions, the current `GITHUB_REPOSITORY`), normalized to a safe fork-specific name; never hardcode a public `.modal.run` URL.
 - Worker GPU: L4.
 - Worker model/cache data must live on the persistent Modal Volume `raiw-model-cache`, mounted at `/cache`.
 - `HF_HOME`, `XDG_CACHE_HOME`, `UV_CACHE_DIR`, and `DIFFSYNTH_MODEL_BASE_PATH` intentionally point inside `/cache`.
@@ -43,16 +44,17 @@ Pushes to `main` that modify either of these files trigger production deployment
 The workflow must:
 
 1. check out the repository;
-2. set up Python 3.11 using the current supported `actions/setup-python` major version;
-3. restore the cached `.modal-venv` environment when available;
-4. install the pinned Modal CLI only on cache miss, then save the virtual environment cache;
-5. verify the two required GitHub Modal token environment variables are present;
-6. verify that the named Modal Secret `raiw-auth` exists;
-7. record the UTC deployment start timestamp;
-8. run `modal deploy modal_app.py` and extract the actual `.modal.run` web URL from the deploy output instead of hardcoding it;
-9. allow a short rollout grace period before health checks so a request is not sent to the previous revision during cutover;
-10. smoke-test the deployed `/login` endpoint;
-11. print Modal runtime logs only from the current deployment timestamp onward when the smoke test fails.
+2. derive a fork-specific Modal app name from the current GitHub repository;
+3. set up Python 3.11 using the current supported `actions/setup-python` major version;
+4. restore the cached `.modal-venv` environment when available;
+5. install the pinned Modal CLI only on cache miss, then save the virtual environment cache;
+6. verify the two required GitHub Modal token environment variables are present;
+7. verify that the named Modal Secret `raiw-auth` exists;
+8. record the UTC deployment start timestamp;
+9. run `modal deploy modal_app.py` and extract the actual `.modal.run` web URL from the deploy output instead of hardcoding it;
+10. allow a short rollout grace period before health checks so a request is not sent to the previous revision during cutover;
+11. smoke-test the deployed `/login` endpoint;
+12. print Modal runtime logs for the resolved app name and only from the current deployment timestamp onward when the smoke test fails.
 
 The Modal CLI cache key must include OS, architecture, the resolved Python version, the pinned Modal CLI version, and a manual cache revision. Bump the revision if a cached environment must be invalidated manually. Do not cache secrets.
 
@@ -63,6 +65,10 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 ## Change log
 
 ### 2026-09-14
+
+- Made the Modal app identity fork-aware: the app name is derived automatically from the current GitHub repository, while `MODAL_APP_NAME` remains available as an explicit override for local/non-GitHub deploys.
+- Updated the workflow log command to use the same resolved app name and kept public URL discovery based on the URL emitted by `modal deploy`.
+- Updated the README so fork users do not copy a fixed repository or `.modal.run` URL.
 
 - Diagnosed the first `Deploy Modal` failure.
 - Root cause: invalid explicit `ephemeral_disk=120_000` MiB request.
