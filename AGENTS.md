@@ -61,7 +61,7 @@ The workflow must:
 6. verify the two required GitHub Modal token environment variables are present;
 7. verify that the named Modal Secret `raiw-auth` exists;
 8. record the UTC deployment start timestamp;
-9. set a unique `RAIW_DEPLOY_ID`, run `modal deploy modal_app.py`, and extract the actual `.modal.run` web URL from the deploy output instead of hardcoding it;
+9. set a unique `RAIW_DEPLOY_ID`, run `modal deploy modal_app.py`, emit a bounded sanitized GitHub error annotation when the deploy command fails, and extract the actual `.modal.run` web URL from successful deploy output instead of hardcoding it;
 10. allow a short rollout grace period before health checks so a request is not sent to the previous revision during cutover;
 11. smoke-test the deployed `/login` endpoint;
 12. print Modal runtime logs for the resolved app name and only from the current deployment timestamp onward when the smoke test fails.
@@ -76,6 +76,7 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 
 ### 2026-09-18
 
+- Added bounded deploy-error annotations to GitHub Actions so an early `modal deploy` failure remains diagnosable even when raw Actions logs are unavailable to the connected client.
 - Namespaced GPU job-admission slots by the unique CI deployment id while retaining the stale-reservation lease, preventing reservations orphaned by `--strategy recreate` from blocking the replacement deployment.
 - Added bounded audit-event ring storage so failed-login/event traffic cannot grow the audit key space without limit.
 - Added login throttling before password verification, keyed by normalized account and trusted Modal client IP.

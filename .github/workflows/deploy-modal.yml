@@ -132,7 +132,27 @@ jobs:
 
           echo "MODAL_LOG_SINCE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
 
-          modal deploy --name "$modal_app_name" --strategy recreate modal_app.py | tee /tmp/modal-deploy.log
+          set +e
+          modal deploy --name "$modal_app_name" --strategy recreate modal_app.py 2>&1 | tee /tmp/modal-deploy.log
+          deploy_status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$deploy_status" -ne 0 ]; then
+            deploy_error="$(python - <<'PY'
+          import re
+          from pathlib import Path
+
+          raw = Path("/tmp/modal-deploy.log").read_text(encoding="utf-8", errors="replace")
+          raw = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", raw)
+          lines = [line.strip() for line in raw.splitlines() if line.strip()]
+          message = " | ".join(lines[-20:])
+          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(message[:6000] or "modal deploy failed without output")
+          PY
+            )"
+            echo "::error title=Modal deploy failed::$deploy_error"
+            exit "$deploy_status"
+          fi
 
           # Modal may wrap a long URL between physical terminal lines.
           # Recombine only the URL candidate so timestamps/tree glyphs cannot
