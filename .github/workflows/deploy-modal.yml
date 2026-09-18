@@ -69,6 +69,13 @@ jobs:
           echo "$GITHUB_WORKSPACE/.modal-venv/bin" >> "$GITHUB_PATH"
           .modal-venv/bin/modal --version
 
+      - name: Run security regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          .modal-venv/bin/python -m py_compile modal_app.py
+          .modal-venv/bin/python -m unittest discover -s tests -v
+
       - name: Save Modal CLI environment
         if: steps.modal-cli-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6

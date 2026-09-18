@@ -73,7 +73,15 @@ ACTIVE_SESSION_SECONDS = 90
 SESSION_RETENTION_SECONDS = SESSION_TTL_SECONDS
 ACTIVITY_RETURN_LIMIT = 120
 ACTIVITY_STORE_LIMIT = 1_000
+LEGACY_EVENT_PREFIX = "event:"
+EVENT_RING_PREFIX = "event-ring:"
 GEO_CACHE_SECONDS = 7 * 24 * 60 * 60
+AUTH_RATE_WINDOW_SECONDS = 5 * 60
+MAX_AUTH_ATTEMPTS_PER_ACCOUNT = 5
+MAX_AUTH_ATTEMPTS_PER_IP = 20
+MAX_ACTIVE_JOBS_PER_USER = 1
+MAX_ACTIVE_JOBS_GLOBAL = 4
+JOB_ADMISSION_LEASE_SECONDS = 3 * 60 * 60
 
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".avif"}
 USERNAME_RE = re.compile(r"^[a-z0-9._-]{3,32}$")
@@ -85,6 +93,8 @@ cache_vol = modal.Volume.from_name("raiw-model-cache", create_if_missing=True)
 users_store = modal.Dict.from_name("raiw-users-v1", create_if_missing=True)
 audit_store = modal.Dict.from_name("raiw-audit-v1", create_if_missing=True)
 ban_store = modal.Dict.from_name("raiw-bans-v1", create_if_missing=True)
+auth_throttle_store = modal.Dict.from_name("raiw-auth-throttle-v1", create_if_missing=True)
+job_admission_store = modal.Dict.from_name("raiw-job-admission-v1", create_if_missing=True)
 
 CACHE_DIR = "/cache"
 BASE_ENV = {
@@ -188,6 +198,7 @@ def new_user_record(username: str, password: str, role: str = "user") -> dict:
     return {
         "username": username,
         "password": make_password_record(password),
+        "auth_generation": 0,
         "role": role,
         "enabled": True,
         "deleted": False,
@@ -197,6 +208,24 @@ def new_user_record(username: str, password: str, role: str = "user") -> dict:
         "jobs_ok": 0,
         "jobs_failed": 0,
     }
+
+
+def user_auth_generation(record: dict) -> int:
+    try:
+        generation = int(record.get("auth_generation", 0))
+    except (TypeError, ValueError):
+        return -1
+    return generation if generation >= 0 else -1
+
+
+def reset_user_password_record(record: dict, password: str) -> dict:
+    generation = user_auth_generation(record)
+    if generation < 0:
+        raise ValueError("Stato autenticazione utente non valido.")
+    updated = dict(record)
+    updated["password"] = make_password_record(password)
+    updated["auth_generation"] = generation + 1
+    return updated
 
 
 def get_user(username: str) -> dict | None:
@@ -337,8 +366,18 @@ def request_client_context(request, *, enrich: bool = False) -> dict:
     }
 
 
+_event_slot_lock = threading.Lock()
+_event_slot_cursor = secrets.randbelow(max(1, ACTIVITY_STORE_LIMIT))
+
+
 def event_key() -> str:
-    return f"event:{time.time_ns():020d}:{secrets.token_hex(4)}"
+    """Return a fixed-slot key so audit event storage cannot grow without bound."""
+    global _event_slot_cursor
+    with _event_slot_lock:
+        limit = max(1, ACTIVITY_STORE_LIMIT)
+        slot = _event_slot_cursor % limit
+        _event_slot_cursor = (slot + 1) % limit
+    return f"{EVENT_RING_PREFIX}{slot:04d}"
 
 
 def record_event(
@@ -372,20 +411,23 @@ def record_event(
 
 
 def recent_events(limit: int = ACTIVITY_RETURN_LIMIT) -> list[dict]:
-    rows: list[tuple[str, dict]] = []
+    rows: list[dict] = []
     try:
-        keys = [str(key) for key in audit_store.keys() if str(key).startswith("event:")]
-        keys.sort(reverse=True)
-        for key in keys[: max(1, min(limit, ACTIVITY_RETURN_LIMIT))]:
-            value = audit_store.get(key)
-            if isinstance(value, dict):
-                rows.append((key, value))
-        if len(keys) > ACTIVITY_STORE_LIMIT:
-            for key in keys[ACTIVITY_STORE_LIMIT:]:
-                audit_store.pop(key, None)
+        for raw_key, value in audit_store.items():
+            key = str(raw_key)
+            if (
+                key.startswith(EVENT_RING_PREFIX) or key.startswith(LEGACY_EVENT_PREFIX)
+            ) and isinstance(value, dict):
+                rows.append(value)
+        rows.sort(
+            key=lambda value: value.get("epoch", 0.0)
+            if isinstance(value.get("epoch", 0.0), (int, float))
+            else 0.0,
+            reverse=True,
+        )
     except Exception:
         pass
-    return [value for _, value in rows]
+    return rows[: max(1, min(limit, ACTIVITY_RETURN_LIMIT))]
 
 
 def session_payload_from_request(request) -> dict | None:
@@ -419,27 +461,43 @@ def session_client_context(request) -> dict:
     return client
 
 
-def register_session(token: str, username: str, client: dict) -> None:
+def active_session_record(payload: dict) -> dict | None:
+    session_id = str(payload.get("nonce", ""))
+    username = normalize_username(payload.get("u", ""))
+    if not session_id or not username:
+        return None
+    rec = audit_store.get(session_key(session_id))
+    if not isinstance(rec, dict):
+        return None
+    if str(rec.get("session_id", "")) != session_id:
+        return None
+    if normalize_username(rec.get("username", "")) != username:
+        return None
+    if rec.get("logged_out_at"):
+        return None
+    return rec
+
+
+def register_session(token: str, username: str, client: dict) -> bool:
     payload = verify_signed_payload(token, expected_kind="session")
     if not payload:
-        return
+        return False
     session_id = str(payload.get("nonce", ""))
     if not session_id:
-        return
+        return False
     now = time.time()
-    try:
-        audit_store[session_key(session_id)] = {
-            "session_id": session_id,
-            "username": normalize_username(username),
-            "login_at": utc_now_iso(),
-            "last_seen_at": utc_now_iso(),
-            "last_seen_epoch": now,
-            "expires_epoch": float(payload.get("exp", now + SESSION_TTL_SECONDS)),
-            "logged_out_at": None,
-            **client,
-        }
-    except Exception:
-        pass
+    audit_store[session_key(session_id)] = {
+        "session_id": session_id,
+        "username": normalize_username(username),
+        "auth_generation": int(payload.get("auth_generation", 0)),
+        "login_at": utc_now_iso(),
+        "last_seen_at": utc_now_iso(),
+        "last_seen_epoch": now,
+        "expires_epoch": float(payload.get("exp", now + SESSION_TTL_SECONDS)),
+        "logged_out_at": None,
+        **client,
+    }
+    return True
 
 
 def touch_session(request, username: str) -> None:
@@ -494,23 +552,28 @@ def update_session_activity(request, username: str, *, action: str = "", command
         pass
 
 
-def close_session(request) -> None:
+def close_session(request) -> bool:
     payload = session_payload_from_request(request)
     if not payload:
-        return
+        return False
     session_id = str(payload.get("nonce", ""))
-    if not session_id:
-        return
+    username = normalize_username(payload.get("u", ""))
+    if not session_id or not username:
+        return False
     key = session_key(session_id)
-    try:
-        rec = audit_store.get(key)
-        if isinstance(rec, dict):
-            rec["logged_out_at"] = utc_now_iso()
-            rec["last_seen_at"] = utc_now_iso()
-            rec["last_seen_epoch"] = time.time()
-            audit_store[key] = rec
-    except Exception:
-        pass
+    rec = audit_store.get(key)
+    if not isinstance(rec, dict):
+        return False
+    if str(rec.get("session_id", "")) != session_id:
+        return False
+    if normalize_username(rec.get("username", "")) != username:
+        return False
+    if not rec.get("logged_out_at"):
+        rec["logged_out_at"] = utc_now_iso()
+        rec["last_seen_at"] = utc_now_iso()
+        rec["last_seen_epoch"] = time.time()
+        audit_store[key] = rec
+    return True
 
 
 def list_sessions() -> list[dict]:
@@ -608,12 +671,15 @@ def verify_signed_payload(token: str, *, expected_kind: str) -> dict | None:
         return None
 
 
-def create_session_token(username: str) -> str:
+def create_session_token(username: str, auth_generation: int) -> str:
+    if auth_generation < 0:
+        raise ValueError("Generazione autenticazione non valida.")
     now = int(time.time())
     return sign_payload(
         {
             "kind": "session",
             "u": normalize_username(username),
+            "auth_generation": int(auth_generation),
             "iat": now,
             "exp": now + SESSION_TTL_SECONDS,
             "nonce": secrets.token_hex(8),
@@ -644,6 +710,170 @@ def safe_origin(request) -> bool:
         return False
 
 
+def _release_owned_job_slot(key: str, reservation_id: str) -> None:
+    current = job_admission_store.get(key)
+    if not isinstance(current, dict):
+        return
+    current_id = str(current.get("id", ""))
+    if current_id and hmac.compare_digest(current_id, reservation_id):
+        job_admission_store.pop(key, None)
+
+
+def _claim_job_slot(scope: str, limit: int, reservation: dict) -> str | None:
+    now = time.time()
+    for slot in range(limit):
+        key = f"{scope}:{slot}"
+        current = job_admission_store.get(key)
+        if isinstance(current, dict):
+            current_id = str(current.get("id", ""))
+            try:
+                age = now - float(current.get("created_at", now))
+            except (TypeError, ValueError):
+                age = 0.0
+            if current_id and age >= JOB_ADMISSION_LEASE_SECONDS:
+                _release_owned_job_slot(key, current_id)
+        if job_admission_store.put(key, reservation, skip_if_exists=True):
+            return key
+    return None
+
+
+def reserve_job_admission(username: str) -> tuple[dict | None, str | None]:
+    """Reserve one per-user slot and one global slot before GPU spawn."""
+    username = normalize_username(username)
+    reservation = {
+        "id": secrets.token_hex(16),
+        "username": username,
+        "created_at": time.time(),
+    }
+
+    user_slot = _claim_job_slot(f"user:{username}", MAX_ACTIVE_JOBS_PER_USER, reservation)
+    if not user_slot:
+        return None, "user"
+
+    try:
+        global_slot = _claim_job_slot("global", MAX_ACTIVE_JOBS_GLOBAL, reservation)
+    except Exception:
+        _release_owned_job_slot(user_slot, reservation["id"])
+        raise
+
+    if not global_slot:
+        _release_owned_job_slot(user_slot, reservation["id"])
+        return None, "global"
+
+    return {
+        **reservation,
+        "user_slot": user_slot,
+        "global_slot": global_slot,
+    }, None
+
+
+def release_job_admission(admission: dict | None) -> None:
+    if not admission:
+        return
+    reservation_id = str(admission.get("id", ""))
+    if not reservation_id:
+        return
+    try:
+        for field in ("global_slot", "user_slot"):
+            key = str(admission.get(field, ""))
+            if key:
+                _release_owned_job_slot(key, reservation_id)
+    except Exception as exc:
+        print(
+            f"[job] Rilascio capacità non riuscito per {reservation_id}: "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
+
+
+def trusted_client_ip(request) -> str:
+    client = getattr(request, "client", None)
+    candidate = str(getattr(client, "host", "") or "").strip().strip("[]")
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return "unknown"
+
+
+def _auth_identity(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
+
+
+def _auth_window(now: float | None = None) -> tuple[int, int]:
+    current = time.time() if now is None else float(now)
+    bucket = int(current // AUTH_RATE_WINDOW_SECONDS)
+    retry_after = max(1, int(((bucket + 1) * AUTH_RATE_WINDOW_SECONDS) - current))
+    return bucket, retry_after
+
+
+def _claim_auth_slot(scope: str, identity: str, limit: int, bucket: int, reservation: dict) -> str | None:
+    prefix = f"{scope}:{_auth_identity(identity)}:{bucket}"
+    for slot in range(limit):
+        key = f"{prefix}:{slot}"
+        if auth_throttle_store.put(key, reservation, skip_if_exists=True):
+            return key
+    return None
+
+
+def _release_owned_auth_slot(key: str, reservation_id: str) -> None:
+    current = auth_throttle_store.get(key)
+    if not isinstance(current, dict):
+        return
+    current_id = str(current.get("id", ""))
+    if current_id and hmac.compare_digest(current_id, reservation_id):
+        auth_throttle_store.pop(key, None)
+
+
+def reserve_auth_attempt(username: str, ip: str, *, now: float | None = None) -> tuple[dict | None, str | None, int]:
+    bucket, retry_after = _auth_window(now)
+    reservation = {
+        "id": secrets.token_hex(16),
+        "created_at": time.time() if now is None else float(now),
+        "bucket": bucket,
+    }
+
+    account_slot = _claim_auth_slot(
+        "account",
+        normalize_username(username),
+        MAX_AUTH_ATTEMPTS_PER_ACCOUNT,
+        bucket,
+        reservation,
+    )
+    if not account_slot:
+        return None, "account", retry_after
+
+    try:
+        ip_slot = _claim_auth_slot("ip", ip or "unknown", MAX_AUTH_ATTEMPTS_PER_IP, bucket, reservation)
+    except Exception:
+        _release_owned_auth_slot(account_slot, reservation["id"])
+        raise
+
+    if not ip_slot:
+        _release_owned_auth_slot(account_slot, reservation["id"])
+        return None, "ip", retry_after
+
+    return {
+        **reservation,
+        "account_slot": account_slot,
+        "ip_slot": ip_slot,
+    }, None, retry_after
+
+
+def release_auth_attempt(reservation: dict | None) -> None:
+    if not reservation:
+        return
+    reservation_id = str(reservation.get("id", ""))
+    if not reservation_id:
+        return
+    try:
+        for field in ("ip_slot", "account_slot"):
+            key = str(reservation.get(field, ""))
+            if key:
+                _release_owned_auth_slot(key, reservation_id)
+    except Exception as exc:
+        print(f"[auth] Rilascio tentativo non riuscito: {type(exc).__name__}: {exc}", flush=True)
+
+
 def mark_job_result(username: str, ok: bool) -> None:
     try:
         key = user_key(username)
@@ -669,7 +899,13 @@ def mark_job_result(username: str, ok: bool) -> None:
     volumes={CACHE_DIR: cache_vol},
     env=BASE_ENV,
 )
-def process_image(input_bytes: bytes, original_name: str, username: str, client: dict | None = None) -> dict:
+def process_image(
+    input_bytes: bytes,
+    original_name: str,
+    username: str,
+    client: dict | None = None,
+    admission: dict | None = None,
+) -> dict:
     """Elabora una foto e non lascia file di job persistenti.
 
     Tutti i file input/output/log sono in TemporaryDirectory e vengono cancellati
@@ -827,6 +1063,7 @@ def process_image(input_bytes: bytes, original_name: str, username: str, client:
             "elapsed_seconds": round(time.monotonic() - started, 1),
         }
     finally:
+        release_job_admission(admission)
         mark_job_result(username, ok)
         record_event(
             "job_completed" if ok else "job_failed",
@@ -856,11 +1093,11 @@ HOME_HTML = """<!doctype html>
 <title>Remove AI Watermarks</title>
 <style>
 :root{font-family:system-ui;background:#f5f5f7;color:#171717}body{margin:0}.wrap{max-width:760px;margin:auto;padding:26px 16px 50px}
-.top{display:flex;justify-content:space-between;align-items:center;gap:12px}.top a{color:#111;text-decoration:none}.card{background:white;padding:22px;border-radius:18px;box-shadow:0 8px 28px #0000000d;margin-top:18px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px}.top a{color:#111;text-decoration:none}.logout-form{display:inline}.logout-link{background:none;color:#111;padding:0;font:inherit;font-weight:400}.card{background:white;padding:22px;border-radius:18px;box-shadow:0 8px 28px #0000000d;margin-top:18px}
 h1{margin:0}.muted{color:#666}.drop{border:2px dashed #bbb;border-radius:14px;padding:24px;margin-top:16px;text-align:center}button{border:0;border-radius:10px;background:#111;color:#fff;padding:12px 18px;font-weight:700;cursor:pointer}
 progress{width:100%;height:14px;margin-top:14px}.ok{color:#087a2f}.warn{color:#9a6700}.err{color:#b42318;white-space:pre-wrap}.free{display:flex;justify-content:space-between;gap:14px;align-items:end}.big{font-size:30px;font-weight:800}.tiny{font-size:12px;color:#777}.hidden{display:none}
 </style></head><body><div class='wrap'>
-<div class='top'><div><h1>🧹 Remove AI Watermarks</h1><div class='muted'>Ciao, __USERNAME__</div></div><div>__ADMIN_LINK__ <a href='/logout'>Esci</a></div></div>
+<div class='top'><div><h1>🧹 Remove AI Watermarks</h1><div class='muted'>Ciao, __USERNAME__</div></div><div>__ADMIN_LINK__ <form class='logout-form' method='post' action='/logout'><button class='logout-link' type='submit'>Esci</button></form></div></div>
 <div class='card'><b>Carica una foto</b><div class='muted'>JPG, PNG, WebP, HEIC/HEIF o AVIF · max 30 MB</div>
 <form id='form'><div class='drop'><input type='file' name='file' accept='.jpg,.jpeg,.png,.webp,.heic,.heif,.avif' required></div><br><button type='submit'>Elabora foto</button></form>
 <progress id='progress' class='hidden'></progress><div id='status' class='muted' style='margin-top:12px'>In attesa.</div>
@@ -905,6 +1142,15 @@ def current_user_from_request(request) -> dict | None:
         return None
     rec = get_user(payload.get("u", ""))
     if not rec or not rec.get("enabled"):
+        return None
+    generation = user_auth_generation(rec)
+    try:
+        token_generation = int(payload.get("auth_generation", 0))
+    except (TypeError, ValueError):
+        return None
+    if generation < 0 or token_generation != generation:
+        return None
+    if active_session_record(payload) is None:
         return None
     return rec
 
@@ -1025,6 +1271,27 @@ def web():
             raise HTTPException(status_code=403, detail="Origine richiesta non valida")
         username = normalize_username(username)
         client = request_client_context(request, enrich=False)
+        try:
+            auth_attempt, _limited_by, retry_after = reserve_auth_attempt(
+                username,
+                trusted_client_ip(request),
+            )
+        except Exception as exc:
+            print(f"[auth] Controllo tentativi non disponibile: {type(exc).__name__}: {exc}", flush=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Accesso temporaneamente non disponibile.",
+                headers={"Retry-After": "15"},
+            ) from exc
+
+        if not auth_attempt:
+            time.sleep(0.35)
+            return HTMLResponse(
+                LOGIN_HTML.replace('__ERROR__', "<div class='err'>Credenziali non valide.</div>"),
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+
         rec = get_user(username)
         if not rec or not rec.get("enabled") or not verify_password(password, rec):
             record_event(
@@ -1039,11 +1306,23 @@ def web():
                 LOGIN_HTML.replace('__ERROR__', "<div class='err'>Credenziali non valide.</div>"),
                 status_code=401,
             )
+        release_auth_attempt(auth_attempt)
         rec["last_login_at"] = utc_now_iso()
         users_store[user_key(username)] = rec
         client = request_client_context(request, enrich=True)
-        session_token = create_session_token(username)
-        register_session(session_token, username, client)
+        generation = user_auth_generation(rec)
+        if generation < 0:
+            raise HTTPException(status_code=500, detail="Stato autenticazione utente non valido.")
+        session_token = create_session_token(username, generation)
+        try:
+            if not register_session(session_token, username, client):
+                raise RuntimeError("Token di sessione generato non valido.")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Sessione temporaneamente non disponibile. Riprova.",
+                headers={"Retry-After": "15"},
+            ) from exc
         record_event("login", username=username, client=client, detail="Accesso riuscito", status="ok")
         response = RedirectResponse("/", status_code=303)
         response.set_cookie(
@@ -1057,13 +1336,23 @@ def web():
         )
         return response
 
-    @web_app.get("/logout")
+    @web_app.post("/logout")
     def logout(request: Request):
+        if not safe_origin(request):
+            raise HTTPException(status_code=403, detail="Origine richiesta non valida")
         user = current_user_from_request(request)
         client = session_client_context(request)
         if user:
+            try:
+                if not close_session(request):
+                    raise RuntimeError("Sessione corrente non trovata.")
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Chiusura sessione temporaneamente non disponibile. Riprova.",
+                    headers={"Retry-After": "15"},
+                ) from exc
             record_event("logout", username=user["username"], client=client, detail="Sessione chiusa")
-        close_session(request)
         response = RedirectResponse("/login", status_code=303)
         response.delete_cookie("raiw_session", path="/")
         return response
@@ -1126,6 +1415,29 @@ def web():
             command=command,
             detail=safe_name,
         )
+        try:
+            admission, rejected_by = reserve_job_admission(user["username"])
+        except Exception as exc:
+            print(f"[web] Controllo capacità non disponibile: {type(exc).__name__}: {exc}", flush=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Controllo capacità temporaneamente non disponibile.",
+                headers={"Retry-After": "15"},
+            ) from exc
+
+        if not admission:
+            if rejected_by == "user":
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Hai già {MAX_ACTIVE_JOBS_PER_USER} job attivo. Riprova al termine.",
+                    headers={"Retry-After": "15"},
+                )
+            raise HTTPException(
+                status_code=503,
+                detail="Capacità di elaborazione occupata. Riprova tra poco.",
+                headers={"Retry-After": "15"},
+            )
+
         record_event(
             "job_submitted",
             username=user["username"],
@@ -1134,7 +1446,16 @@ def web():
             command=command,
             status="info",
         )
-        call = process_image.spawn(content, safe_name, user["username"], client)
+        try:
+            call = process_image.spawn(content, safe_name, user["username"], client, admission)
+        except Exception as exc:
+            release_job_admission(admission)
+            print(f"[web] Avvio job non riuscito: {type(exc).__name__}: {exc}", flush=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Avvio elaborazione temporaneamente non disponibile.",
+                headers={"Retry-After": "15"},
+            ) from exc
         return JSONResponse({"job_token": create_job_token(user["username"], call.object_id)})
 
     @web_app.get("/result/{job_token}")
@@ -1373,7 +1694,7 @@ refreshAdmin();setInterval(refreshAdmin,3000);
         if not rec:
             raise HTTPException(status_code=404, detail="Utente non trovato")
         try:
-            rec["password"] = make_password_record(password)
+            rec = reset_user_password_record(rec, password)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         users_store[user_key(username)] = rec

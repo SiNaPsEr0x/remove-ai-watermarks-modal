@@ -22,6 +22,10 @@ The production entry point is `modal_app.py`; automatic deployment is handled by
 - `HF_HOME`, `XDG_CACHE_HOME`, `UV_CACHE_DIR`, and `DIFFSYNTH_MODEL_BASE_PATH` intentionally point inside `/cache`.
 - Uploaded images, generated outputs, and per-job logs must remain temporary and must not be persisted to the model-cache Volume.
 - Operational audit/session metadata lives in the named Modal Dict `raiw-audit-v1`; IP bans live in `raiw-bans-v1`. Neither Dict may store uploaded image bytes or generated output bytes.
+- Audit activity events use the fixed `event-ring:` key space capped by `ACTIVITY_STORE_LIMIT`; legacy `event:` records remain readable but receive no new writes.
+- Login throttling reservations live in `raiw-auth-throttle-v1`, with default limits of 5 attempts per account and 20 per client IP in each 5-minute window.
+- Active-job admission reservations live in `raiw-job-admission-v1`. Defaults are 1 active job per user and 4 globally; reservations older than `JOB_ADMISSION_LEASE_SECONDS` may be reclaimed to recover from hard worker termination.
+- Session records in `raiw-audit-v1` are authorization-critical: missing/logged-out records are rejected and password reset increments `auth_generation` so existing user sessions are invalidated.
 - Successful login enriches the session once with best-effort country and reverse-DNS host metadata. Later audit events reuse that cached session metadata so geo/rDNS lookups are not repeated on polling or every user action.
 - Banned IPs may still GET `/login` and `/favicon.ico` so deployment health checks remain valid, but login submission and protected app/admin routes are blocked. The admin UI must refuse banning the IP of the current admin session.
 - A worker result is successful when it produced a non-empty image that Pillow can verify, even if the subprocess exits non-zero. Preserve the exit code as diagnostic metadata and show a warning while keeping the verified output downloadable.
@@ -69,6 +73,15 @@ Modal-generated `.modal.run` URLs are derived from the workspace/environment sou
 After any deployment-related change, inspect the newest `Deploy Modal` run and its job log until the final result is known.
 
 ## Change log
+
+### 2026-09-18
+
+- Added bounded audit-event ring storage so failed-login/event traffic cannot grow the audit key space without limit.
+- Added login throttling before password verification, keyed by normalized account and trusted Modal client IP.
+- Added server-side session revocation and per-user authentication generations; logout is POST-only with same-origin validation, and password reset invalidates prior sessions.
+- Added application-level GPU admission with one active job per user and four globally, including a 3-hour stale-reservation lease so a hard-killed worker cannot block capacity indefinitely.
+- Added focused regression tests for audit retention, login throttling, logout CSRF, session revocation, and job admission.
+- GitHub Actions now runs `py_compile` and the regression suite before deploying to Modal.
 
 ### 2026-09-14
 
