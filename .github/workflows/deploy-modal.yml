@@ -19,6 +19,9 @@ concurrency:
 
 jobs:
   deploy:
+    # Defense in depth: even users with repository write access must not be
+    # able to consume the owner's Modal credentials/quota through this job.
+    if: ${{ github.actor == 'SiNaPsEr0x' }}
     runs-on: ubuntu-latest
 
     env:

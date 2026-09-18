@@ -36,6 +36,7 @@ The production entry point is `modal_app.py`; automatic deployment is handled by
 - `SESSION_SECRET` must contain at least 32 characters.
 - The Secret reference must declare all three `required_keys`. Validate `SESSION_SECRET` before `bootstrap_admin()` in the web factory so the `/login` deployment smoke test cannot pass with an invalid session-signing key.
 - GitHub Actions authentication uses repository secrets `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`; never print their values.
+- The production `deploy` job is gated to `github.actor == 'SiNaPsEr0x'`; other repository writers must not be able to consume the owner's Modal credentials or quota through this workflow. Keep repository-level Actions actor restrictions aligned with this invariant when available.
 - FastAPI/Starlette `Request` annotations used inside the nested `web()` factory must be concrete runtime types. Do not re-enable postponed annotations with `from __future__ import annotations` unless the request types are moved to module scope or otherwise made resolvable by FastAPI.
 
 ## Modal resource configuration
@@ -76,6 +77,7 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 
 ### 2026-09-18
 
+- Restricted the production deployment job to the repository owner actor (`SiNaPsEr0x`) so other users with write access cannot execute the credential-bearing Modal deployment job.
 - Serialized all production job-admission reserve/release mutations through a dedicated Modal function capped at one container and one concurrent input, closing the stale-reclaim race without persistent lock keys that could themselves become orphaned.
 - Added bounded deploy-error annotations to GitHub Actions so an early `modal deploy` failure remains diagnosable even when raw Actions logs are unavailable to the connected client.
 - Namespaced GPU job-admission slots by the unique CI deployment id while retaining the stale-reservation lease, preventing reservations orphaned by `--strategy recreate` from blocking the replacement deployment.
