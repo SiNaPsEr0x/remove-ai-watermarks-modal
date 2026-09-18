@@ -798,6 +798,39 @@ def release_job_admission(admission: dict | None) -> None:
         )
 
 
+@app.function(env=DEPLOY_ENV, max_containers=1)
+@modal.concurrent(max_inputs=1)
+def job_admission_control(
+    action: str,
+    username: str = "",
+    admission: dict | None = None,
+) -> tuple[dict | None, str | None] | bool:
+    """Serialize all admission-store mutations in one Modal input at a time."""
+    if action == "reserve":
+        return reserve_job_admission(username)
+    if action == "release":
+        release_job_admission(admission)
+        return True
+    raise ValueError(f"Operazione admission non valida: {action}")
+
+
+def reserve_job_admission_remote(username: str) -> tuple[dict | None, str | None]:
+    return job_admission_control.remote("reserve", username=username)
+
+
+def release_job_admission_remote(admission: dict | None) -> None:
+    if not admission:
+        return
+    try:
+        job_admission_control.remote("release", admission=admission)
+    except Exception as exc:
+        print(
+            f"[job] Rilascio capacità remoto non riuscito per {admission.get('id', '')}: "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
+
+
 def trusted_client_ip(request) -> str:
     client = getattr(request, "client", None)
     candidate = str(getattr(client, "host", "") or "").strip().strip("[]")
@@ -1075,7 +1108,7 @@ def process_image(
             "elapsed_seconds": round(time.monotonic() - started, 1),
         }
     finally:
-        release_job_admission(admission)
+        release_job_admission_remote(admission)
         mark_job_result(username, ok)
         record_event(
             "job_completed" if ok else "job_failed",
@@ -1429,7 +1462,7 @@ def web():
             detail=safe_name,
         )
         try:
-            admission, rejected_by = reserve_job_admission(user["username"])
+            admission, rejected_by = reserve_job_admission_remote(user["username"])
         except Exception as exc:
             print(f"[web] Controllo capacità non disponibile: {type(exc).__name__}: {exc}", flush=True)
             raise HTTPException(
@@ -1462,7 +1495,7 @@ def web():
         try:
             call = process_image.spawn(content, safe_name, user["username"], client, admission)
         except Exception as exc:
-            release_job_admission(admission)
+            release_job_admission_remote(admission)
             print(f"[web] Avvio job non riuscito: {type(exc).__name__}: {exc}", flush=True)
             raise HTTPException(
                 status_code=503,

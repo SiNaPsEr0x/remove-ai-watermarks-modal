@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import modal_app as m
@@ -65,6 +66,15 @@ class JobAdmissionTests(unittest.TestCase):
         self.assertIsNone(rejected)
         self.assertTrue(reservation["user_slot"].startswith("release:test-current-deploy:"))
         self.assertTrue(reservation["global_slot"].startswith("release:test-current-deploy:"))
+
+    def test_production_admission_is_serialized_by_modal_coordinator(self):
+        source = Path(m.__file__).read_text(encoding="utf-8")
+        coordinator = source.split("def job_admission_control(", 1)[0]
+        coordinator = coordinator.rsplit("@app.function", 1)[1]
+        self.assertIn("max_containers=1", coordinator)
+        self.assertIn("@modal.concurrent(max_inputs=1)", coordinator)
+        self.assertIn("reserve_job_admission_remote(user[\"username\"])", source)
+        self.assertIn("release_job_admission_remote(admission)", source)
 
 
 if __name__ == "__main__":

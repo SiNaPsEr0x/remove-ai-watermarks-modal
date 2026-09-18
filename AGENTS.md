@@ -76,6 +76,7 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 
 ### 2026-09-18
 
+- Serialized all production job-admission reserve/release mutations through a dedicated Modal function capped at one container and one concurrent input, closing the stale-reclaim race without persistent lock keys that could themselves become orphaned.
 - Added bounded deploy-error annotations to GitHub Actions so an early `modal deploy` failure remains diagnosable even when raw Actions logs are unavailable to the connected client.
 - Namespaced GPU job-admission slots by the unique CI deployment id while retaining the stale-reservation lease, preventing reservations orphaned by `--strategy recreate` from blocking the replacement deployment.
 - Added bounded audit-event ring storage so failed-login/event traffic cannot grow the audit key space without limit.
