@@ -24,7 +24,7 @@ The production entry point is `modal_app.py`; automatic deployment is handled by
 - Operational audit/session metadata lives in the named Modal Dict `raiw-audit-v1`; IP bans live in `raiw-bans-v1`. Neither Dict may store uploaded image bytes or generated output bytes.
 - Audit activity events use the fixed `event-ring:` key space capped by `ACTIVITY_STORE_LIMIT`; legacy `event:` records remain readable but receive no new writes.
 - Login throttling reservations live in `raiw-auth-throttle-v1`, with default limits of 5 attempts per account and 20 per client IP in each 5-minute window.
-- Active-job admission reservations live in `raiw-job-admission-v1`. Defaults are 1 active job per user and 4 globally; reservations older than `JOB_ADMISSION_LEASE_SECONDS` may be reclaimed to recover from hard worker termination.
+- Active-job admission reservations live in `raiw-job-admission-v1`. Defaults are 1 active job per user and 4 globally. Slot keys are namespaced by `RAIW_DEPLOY_ID`, which CI sets uniquely for each deployment, so orphaned reservations from a `recreate` cutover cannot block the replacement revision; reservations older than `JOB_ADMISSION_LEASE_SECONDS` may also be reclaimed within the current deployment namespace after hard worker termination.
 - Session records in `raiw-audit-v1` are authorization-critical: missing/logged-out records are rejected and password reset increments `auth_generation` so existing user sessions are invalidated.
 - Successful login enriches the session once with best-effort country and reverse-DNS host metadata. Later audit events reuse that cached session metadata so geo/rDNS lookups are not repeated on polling or every user action.
 - Banned IPs may still GET `/login` and `/favicon.ico` so deployment health checks remain valid, but login submission and protected app/admin routes are blocked. The admin UI must refuse banning the IP of the current admin session.
@@ -61,7 +61,7 @@ The workflow must:
 6. verify the two required GitHub Modal token environment variables are present;
 7. verify that the named Modal Secret `raiw-auth` exists;
 8. record the UTC deployment start timestamp;
-9. run `modal deploy modal_app.py` and extract the actual `.modal.run` web URL from the deploy output instead of hardcoding it;
+9. set a unique `RAIW_DEPLOY_ID`, run `modal deploy modal_app.py`, and extract the actual `.modal.run` web URL from the deploy output instead of hardcoding it;
 10. allow a short rollout grace period before health checks so a request is not sent to the previous revision during cutover;
 11. smoke-test the deployed `/login` endpoint;
 12. print Modal runtime logs for the resolved app name and only from the current deployment timestamp onward when the smoke test fails.
@@ -76,6 +76,7 @@ After any deployment-related change, inspect the newest `Deploy Modal` run and i
 
 ### 2026-09-18
 
+- Namespaced GPU job-admission slots by the unique CI deployment id while retaining the stale-reservation lease, preventing reservations orphaned by `--strategy recreate` from blocking the replacement deployment.
 - Added bounded audit-event ring storage so failed-login/event traffic cannot grow the audit key space without limit.
 - Added login throttling before password verification, keyed by normalized account and trusted Modal client IP.
 - Added server-side session revocation and per-user authentication generations; logout is POST-only with same-origin validation, and password reset invalidates prior sessions.

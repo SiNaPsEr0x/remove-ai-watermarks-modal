@@ -10,8 +10,11 @@ class JobAdmissionTests(unittest.TestCase):
         self.store = MemoryStore()
         self.store_patch = patch.object(m, "job_admission_store", self.store)
         self.store_patch.start()
+        self.release_patch = patch.object(m, "JOB_ADMISSION_RELEASE", "test-current-deploy")
+        self.release_patch.start()
 
     def tearDown(self):
+        self.release_patch.stop()
         self.store_patch.stop()
 
     def test_same_user_cannot_exceed_active_limit(self):
@@ -32,7 +35,7 @@ class JobAdmissionTests(unittest.TestCase):
         overflow, rejected = m.reserve_job_admission("overflow")
         self.assertIsNone(overflow)
         self.assertEqual("global", rejected)
-        self.assertNotIn("user:overflow:0", self.store.keys())
+        self.assertNotIn("release:test-current-deploy:user:overflow:0", self.store.keys())
 
     def test_release_makes_capacity_reusable(self):
         first, _ = m.reserve_job_admission("alice")
@@ -43,12 +46,25 @@ class JobAdmissionTests(unittest.TestCase):
         self.assertIsNone(rejected)
 
     def test_stale_reservation_is_reclaimed_after_lease(self):
-        self.store["user:alice:0"] = {"id": "old", "username": "alice", "created_at": 0.0}
+        key = "release:test-current-deploy:user:alice:0"
+        self.store[key] = {"id": "old", "username": "alice", "created_at": 0.0}
         with patch.object(m, "JOB_ADMISSION_LEASE_SECONDS", 10), patch.object(m.time, "time", return_value=100.0):
             reservation, rejected = m.reserve_job_admission("alice")
         self.assertIsNotNone(reservation)
         self.assertIsNone(rejected)
-        self.assertNotEqual("old", self.store.get("user:alice:0")["id"])
+        self.assertNotEqual("old", self.store.get(key)["id"])
+
+    def test_previous_deploy_slots_do_not_block_current_release(self):
+        stale = {"id": "old", "username": "alice", "created_at": 0.0}
+        self.store["release:previous-deploy:user:alice:0"] = stale
+        self.store["release:previous-deploy:global:0"] = stale
+
+        reservation, rejected = m.reserve_job_admission("alice")
+
+        self.assertIsNotNone(reservation)
+        self.assertIsNone(rejected)
+        self.assertTrue(reservation["user_slot"].startswith("release:test-current-deploy:"))
+        self.assertTrue(reservation["global_slot"].startswith("release:test-current-deploy:"))
 
 
 if __name__ == "__main__":

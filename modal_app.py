@@ -83,6 +83,14 @@ MAX_ACTIVE_JOBS_PER_USER = 1
 MAX_ACTIVE_JOBS_GLOBAL = 4
 JOB_ADMISSION_LEASE_SECONDS = 3 * 60 * 60
 
+
+def normalize_deploy_id(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value).strip()).strip("-")
+    return normalized[:128] or "local"
+
+
+JOB_ADMISSION_RELEASE = normalize_deploy_id(os.environ.get("RAIW_DEPLOY_ID", "local"))
+
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".avif"}
 USERNAME_RE = re.compile(r"^[a-z0-9._-]{3,32}$")
 
@@ -97,7 +105,11 @@ auth_throttle_store = modal.Dict.from_name("raiw-auth-throttle-v1", create_if_mi
 job_admission_store = modal.Dict.from_name("raiw-job-admission-v1", create_if_missing=True)
 
 CACHE_DIR = "/cache"
+DEPLOY_ENV = {
+    "RAIW_DEPLOY_ID": JOB_ADMISSION_RELEASE,
+}
 BASE_ENV = {
+    **DEPLOY_ENV,
     "HF_HOME": f"{CACHE_DIR}/huggingface",
     "XDG_CACHE_HOME": f"{CACHE_DIR}/xdg",
     "UV_CACHE_DIR": f"{CACHE_DIR}/uv",
@@ -722,7 +734,7 @@ def _release_owned_job_slot(key: str, reservation_id: str) -> None:
 def _claim_job_slot(scope: str, limit: int, reservation: dict) -> str | None:
     now = time.time()
     for slot in range(limit):
-        key = f"{scope}:{slot}"
+        key = f"release:{JOB_ADMISSION_RELEASE}:{scope}:{slot}"
         current = job_admission_store.get(key)
         if isinstance(current, dict):
             current_id = str(current.get("id", ""))
@@ -1212,6 +1224,7 @@ def estimate_free_status() -> dict:
 @app.function(
     image=web_image,
     secrets=[auth_secret],
+    env=DEPLOY_ENV,
 )
 @modal.concurrent(max_inputs=20)
 @modal.asgi_app()
